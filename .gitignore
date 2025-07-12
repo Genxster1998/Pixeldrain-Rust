@@ -1,0 +1,23 @@
+# Rust build artifacts
+target/
+
+# Go project folders
+go-pd/
+pixeldrain_api_client/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local 

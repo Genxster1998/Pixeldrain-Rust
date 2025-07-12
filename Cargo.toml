@@ -1,0 +1,40 @@
+# This is the Cargo.toml file for a Rust project that uses eframe and egui
+[package]
+name = "pixeldrain"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <you@example.com>"]
+description = "A cross-platform PixelDrain client with egui GUI"
+license = "MIT"
+repository = "https://github.com/yourusername/pixeldrain-egui"
+
+[dependencies]
+eframe = { version = "0.27", features = ["default_fonts"] }
+egui = "0.27"
+tokio = { version = "1.37", features = ["rt-multi-thread", "macros", "fs"] }
+reqwest = { version = "0.12", features = [
+    "json",
+    "multipart",
+    "stream",
+    "blocking",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+directories = "5.0"
+arboard = "3.3"
+rfd = "0.14"
+parking_lot = "0.12"
+url = "2.5"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.7", features = ["v4", "serde"] }
+base64 = "0.21"
+
+# Optional: for logging/debugging
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
