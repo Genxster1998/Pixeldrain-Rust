@@ -9,8 +9,8 @@ license = "MIT"
 repository = "https://github.com/yourusername/pixeldrain-egui"
 
 [dependencies]
-eframe = { version = "0.27", features = ["default_fonts"] }
-egui = "0.27"
+eframe = { version = "0.32", features = ["default_fonts"] }
+egui = "0.32"
 tokio = { version = "1.37", features = ["rt-multi-thread", "macros", "fs"] }
 reqwest = { version = "0.12", features = [
     "json",
@@ -32,6 +32,9 @@ base64 = "0.21"
 # Optional: for logging/debugging
 log = "0.4"
 env_logger = "0.11"
+
+# For icon processing
+image = "0.24"
 
 [profile.release]
 opt-level = 3

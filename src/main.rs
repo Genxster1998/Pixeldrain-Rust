@@ -2,6 +2,7 @@
 use arboard::Clipboard;
 use chrono::{DateTime, Utc};
 use eframe::{egui, App, NativeOptions};
+use egui::IconData;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -12,6 +13,23 @@ use std::env;
 use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// Embed the icon as data bytes at compile time for future use
+const ICON_DATA: &[u8] = include_bytes!("../assets/icon.png");
+
+fn icon_data_from_png() -> Option<IconData> {
+    if let Ok(img) = image::load_from_memory(ICON_DATA) {
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        Some(IconData {
+            rgba: rgba.into_raw(),
+            width,
+            height,
+        })
+    } else {
+        None
+    }
+}
 
 mod pixeldrain_api;
 use pixeldrain_api::{
@@ -246,7 +264,7 @@ impl PixelDrainApp {
                     ui.horizontal_wrapped(|ui| {
                         ui.label("📄");
                         // Constrain width for proper wrapping in narrow windows
-                        ui.add(egui::Label::new(path.display().to_string()).wrap(true));
+                        ui.add(egui::Label::new(path.display().to_string()).wrap());
                     });
                     ui.label(format!("📏 Size: {}", self.format_file_size(path)));
                 } else {
@@ -321,7 +339,7 @@ impl PixelDrainApp {
                     // Use text wrapping for URLs
                     ui.horizontal_wrapped(|ui| {
                         ui.label("🔗");
-                        ui.add(egui::Label::new(&entry.url).wrap(true));
+                        ui.add(egui::Label::new(&entry.url).wrap());
                     });
                     ui.label(format!("🕐 {}", entry.timestamp.format("%Y-%m-%d %H:%M:%S")));
                     ui.separator();
@@ -372,7 +390,7 @@ impl PixelDrainApp {
                 
                 // Use horizontal_wrapped for better text wrapping
                 ui.horizontal_wrapped(|ui| {
-                    ui.add(egui::Label::new(loc).wrap(true));
+                    ui.add(egui::Label::new(loc).wrap());
                 });
             });
             
@@ -998,16 +1016,20 @@ impl PixelDrainApp {
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([300.0, 500.0])
+        .with_min_inner_size([300.0, 400.0]);
+    if let Some(icon) = icon_data_from_png() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([300.0, 500.0])
-            .with_min_inner_size([300.0, 400.0]),
+        viewport,
         ..Default::default()
     };
 
     eframe::run_native(
         "PixelDrain",
         options,
-        Box::new(|_cc| Box::new(PixelDrainApp::default())),
+        Box::new(|_cc| Ok(Box::new(PixelDrainApp::default()))),
     )
 }
