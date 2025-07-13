@@ -48,8 +48,6 @@ struct AppState {
     last_error: Option<String>,
     file_list: Vec<FileInfo>,
     user_info: Option<UserInfo>,
-    // Debug info
-    debug_messages: Vec<String>,
     last_operation_time: Option<DateTime<Utc>>,
     // Theme
     dark_mode: bool,
@@ -65,7 +63,6 @@ impl Default for AppState {
             last_error: None,
             file_list: Vec::new(),
             user_info: None,
-            debug_messages: Vec::new(),
             last_operation_time: None,
             dark_mode: false,
         }
@@ -110,9 +107,6 @@ struct PixelDrainApp {
     // UI State
     show_error: bool,
     error_message: String,
-    // Debug
-    show_debug: bool,
-    debug_log: Vec<String>,
     lists: Vec<pixeldrain_api::ListInfo>,
     selected_list_id: Option<String>,
     new_list_title: String,
@@ -170,8 +164,6 @@ impl Default for PixelDrainApp {
             settings_download_location: String::new(),
             show_error: false,
             error_message: String::new(),
-            show_debug: false,
-            debug_log: Vec::new(),
             lists: Vec::new(),
             selected_list_id: None,
             new_list_title: String::new(),
@@ -215,28 +207,7 @@ impl App for PixelDrainApp {
 }
 
 impl PixelDrainApp {
-    fn add_debug_log(&mut self, message: String) {
-        let timestamp = chrono::Utc::now().format("%H:%M:%S");
-        let log_entry = format!("[{}] {}", timestamp, message);
-        
-        // Add to debug log
-        self.debug_log.push(log_entry.clone());
-        
-        // Keep only last 100 entries
-        if self.debug_log.len() > 100 {
-            self.debug_log.remove(0);
-        }
-        
-        // Also add to state debug messages
-        let mut state = self.state.lock().unwrap();
-        state.debug_messages.push(log_entry);
-        state.last_operation_time = Some(chrono::Utc::now());
-        
-        // Keep only last 50 entries in state
-        if state.debug_messages.len() > 50 {
-            state.debug_messages.remove(0);
-        }
-    }
+
 
     /// Get API key with settings priority
     /// Returns the stored API key if set, otherwise the environment variable
@@ -341,9 +312,7 @@ impl PixelDrainApp {
                     self.save_theme_settings(new_dark_mode);
                 }
                 
-                if ui.button("🔧 Debug").clicked() {
-                    self.show_debug = !self.show_debug;
-                }
+
             });
         });
         
@@ -359,10 +328,7 @@ impl PixelDrainApp {
             Tab::About => self.about_tab(ui),
         }
 
-        // Debug panel
-        if self.show_debug {
-            self.render_debug_panel(ui);
-        }
+
 
         // Error popup
         if self.show_error {
@@ -370,40 +336,7 @@ impl PixelDrainApp {
         }
     }
 
-    fn render_debug_panel(&mut self, ui: &mut egui::Ui) {
-        ui.separator();
-        ui.label("🔧 Debug Information");
-        
-        // Get thread status and last operation time first
-        let upload_running = *self.upload_thread_running.lock().unwrap();
-        let download_running = *self.download_thread_running.lock().unwrap();
-        let last_op = self.state.lock().unwrap().last_operation_time;
-        let debug_messages = self.debug_log.clone();
-        
-        // Show recent debug messages
-        egui::ScrollArea::vertical().max_height(200.0).id_salt("debug_messages_scroll").show(ui, |ui| {
-            for message in &debug_messages {
-                ui.label(message);
-            }
-        });
-        
-        // Show thread status
-        ui.horizontal(|ui| {
-            ui.label(format!("Upload thread: {}", if upload_running { "🔄 Running" } else { "⏸ Idle" }));
-            ui.label(format!("Download thread: {}", if download_running { "🔄 Running" } else { "⏸ Idle" }));
-        });
-        
-        // Show last operation time
-        if let Some(last_op) = last_op {
-            ui.label(format!("Last operation: {}", last_op.format("%H:%M:%S")));
-        }
-        
-        // Clear debug log button
-        if ui.button("🗑 Clear Debug Log").clicked() {
-            self.debug_log.clear();
-            self.state.lock().unwrap().debug_messages.clear();
-        }
-    }
+
 
     fn upload_tab(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         // Check for errors and display them
@@ -813,18 +746,15 @@ impl PixelDrainApp {
             if let Some(file_id) = copy_clicked {
                 let url = format!("https://pixeldrain.com/u/{}", file_id);
                 let _ = Clipboard::new().and_then(|mut c| c.set_text(url));
-                self.add_debug_log(format!("Copied URL for file: {}", file_id));
             }
             
             if let Some(file_id) = delete_clicked {
-                self.add_debug_log(format!("Starting delete for file: {}", file_id));
                 self.delete_file(&file_id);
             }
         }
         
         // Handle refresh action
         if refresh_clicked {
-            self.add_debug_log("Refreshing file list".to_string());
             self.refresh_file_list();
         }
     }
@@ -1233,8 +1163,7 @@ impl PixelDrainApp {
             pixeldrain_api::PixelDrainConfig::default()
         };
         
-        // Enable debug mode for troubleshooting (set to false for production)
-        let config = pixeldrain_api::PixelDrainConfig { debug: false, ..config };
+
         
         pixeldrain_api::PixelDrainClient::new(config).unwrap()
     }
@@ -1446,8 +1375,6 @@ impl PixelDrainApp {
         // Reset progress at start
         *self.upload_progress.lock().unwrap() = 0.0;
         *thread_running.lock().unwrap() = true;
-        // Add debug log for upload start
-        self.add_debug_log(format!("Starting upload: {}", path.display()));
         thread::spawn(move || {
             let config = if let Some(key) = api_key {
                 PixelDrainConfig::default().with_api_key(key)
@@ -1459,8 +1386,6 @@ impl PixelDrainApp {
                 Err(e) => {
                     let mut state = state.lock().unwrap();
                     state.last_error = Some(format!("Failed to create client: {}", e));
-                    state.debug_messages.push(format!("[{}] Upload failed - client creation: {}", 
-                        chrono::Utc::now().format("%H:%M:%S"), e));
                     *thread_running.lock().unwrap() = false;
                     return;
                 }
@@ -1504,13 +1429,9 @@ impl PixelDrainApp {
                     // Copy to clipboard
                     let _ = Clipboard::new().and_then(|mut c| c.set_text(url));
                     state.last_error = None;
-                    state.debug_messages.push(format!("[{}] Upload successful: {}", 
-                        chrono::Utc::now().format("%H:%M:%S"), path.file_name().unwrap().to_string_lossy()));
                 }
                 Err(e) => {
                     state.last_error = Some(format!("Upload error: {}", e));
-                    state.debug_messages.push(format!("[{}] Upload failed: {} - {}", 
-                        chrono::Utc::now().format("%H:%M:%S"), path.file_name().unwrap().to_string_lossy(), e));
                 }
             }
             *thread_running.lock().unwrap() = false;
@@ -1531,9 +1452,6 @@ impl PixelDrainApp {
         *self.upload_progress.lock().unwrap() = 0.0;
         *thread_running.lock().unwrap() = true;
         
-        // Add debug log for upload start
-        self.add_debug_log(format!("Starting multiple upload: {} files", paths.len()));
-        
         thread::spawn(move || {
             let config = if let Some(key) = api_key {
                 PixelDrainConfig::default().with_api_key(key)
@@ -1546,8 +1464,6 @@ impl PixelDrainApp {
                 Err(e) => {
                     let mut state = state.lock().unwrap();
                     state.last_error = Some(format!("Failed to create client: {}", e));
-                    state.debug_messages.push(format!("[{}] Multiple upload failed - client creation: {}", 
-                        chrono::Utc::now().format("%H:%M:%S"), e));
                     *thread_running.lock().unwrap() = false;
                     return;
                 }
@@ -1593,13 +1509,11 @@ impl PixelDrainApp {
                         state.upload_history.push(entry);
                         uploaded_count += 1;
                         
-                        state.debug_messages.push(format!("[{}] File {}/{} uploaded successfully: {}", 
-                            chrono::Utc::now().format("%H:%M:%S"), uploaded_count, total_files, path.file_name().unwrap().to_string_lossy()));
+
                     }
                     Err(e) => {
                         state.last_error = Some(format!("Upload error for {}: {}", path.file_name().unwrap().to_string_lossy(), e));
-                        state.debug_messages.push(format!("[{}] File upload failed: {} - {}", 
-                            chrono::Utc::now().format("%H:%M:%S"), path.file_name().unwrap().to_string_lossy(), e));
+
                         break;
                     }
                 }
@@ -1730,22 +1644,17 @@ impl PixelDrainApp {
                     // Copy URL to clipboard
                     let _ = Clipboard::new().and_then(|mut c| c.set_text(url));
                     
-                    state.debug_messages.push(format!("[{}] Directory uploaded successfully as: {}", 
-                        chrono::Utc::now().format("%H:%M:%S"), archive_name));
+
                 }
                 Err(e) => {
                     eprintln!("[DEBUG] Directory upload error: {}", e);
                     state.last_error = Some(format!("Directory upload error: {}", e));
-                    state.debug_messages.push(format!("[{}] Directory upload failed: {} - {}", 
-                        chrono::Utc::now().format("%H:%M:%S"), archive_name, e));
                 }
             }
             
             // Check if tar process had any errors
             if let Err(e) = tar_result {
                 eprintln!("[DEBUG] Tar process error: {}", e);
-                state.debug_messages.push(format!("[{}] Tar process error: {}", 
-                    chrono::Utc::now().format("%H:%M:%S"), e));
             }
             
             *thread_running.lock().unwrap() = false;
@@ -1953,14 +1862,13 @@ impl PixelDrainApp {
             let mut last_error = None;
             
             for attempt in 1..=MAX_RETRIES {
-                match client.delete_file(&file_id) {
-                    Ok(_) => {
-                        let duration = start_time.elapsed();
-                        {
+                                    match client.delete_file(&file_id) {
+                        Ok(_) => {
+                            let _duration = start_time.elapsed();
+                            {
                             let mut state = state.lock().unwrap();
                             state.last_error = None;
-                            state.debug_messages.push(format!("[{}] Successfully deleted file {} in {:?} (attempt {})", 
-                                chrono::Utc::now().format("%H:%M:%S"), file_id, duration, attempt));
+
                             state.last_operation_time = Some(chrono::Utc::now());
                         } // Release lock here
                         
@@ -1982,8 +1890,7 @@ impl PixelDrainApp {
                                 if let Ok(response) = client.get_user_files() {
                                     let mut state = state_clone.lock().unwrap();
                                     state.file_list = response.files;
-                                    state.debug_messages.push(format!("[{}] File list refreshed after deletion", 
-                                        chrono::Utc::now().format("%H:%M:%S")));
+
                                 }
                             }
                         });
@@ -2022,8 +1929,7 @@ impl PixelDrainApp {
             let mut state = state.lock().unwrap();
             state.last_error = Some(format!("Failed to delete file after {} attempts: {} (took {:?})", 
                 MAX_RETRIES, error_msg, duration));
-            state.debug_messages.push(format!("[{}] Delete failed for file {} after {} attempts: {} (took {:?})", 
-                chrono::Utc::now().format("%H:%M:%S"), file_id, MAX_RETRIES, error_msg, duration));
+
             *file_delete_loading.lock().unwrap() = false;
         });
     }
@@ -2194,13 +2100,12 @@ impl PixelDrainApp {
                 for attempt in 1..=3 { // Retry up to 3 times
                     match client.get_user() {
                         Ok(user_info) => {
-                            let duration = start_time.elapsed();
+                            let _duration = start_time.elapsed();
                             {
                                 let mut state = state.lock().unwrap();
                                 state.user_info = Some(user_info);
                                 state.last_error = None;
-                                state.debug_messages.push(format!("[{}] Successfully fetched user info in {:?} (attempt {})", 
-                                    chrono::Utc::now().format("%H:%M:%S"), duration, attempt));
+
                                 state.last_operation_time = Some(chrono::Utc::now());
                             }
                             *user_info_loading.lock().unwrap() = false;
@@ -2230,12 +2135,11 @@ impl PixelDrainApp {
                 }
 
                 if let Some(error_msg) = last_error {
-                    let duration = start_time.elapsed();
+                    let _duration = start_time.elapsed();
                     let mut state = state.lock().unwrap();
-                    state.last_error = Some(format!("Failed to fetch user info after {} attempts: {} (took {:?})", 
-                        3, error_msg, duration));
-                    state.debug_messages.push(format!("[{}] User info fetch failed after {} attempts: {} (took {:?})", 
-                        chrono::Utc::now().format("%H:%M:%S"), 3, error_msg, duration));
+                    state.last_error = Some(format!("Failed to fetch user info after {} attempts: {}", 
+                        3, error_msg));
+
                 }
                 *user_info_loading.lock().unwrap() = false;
             });
