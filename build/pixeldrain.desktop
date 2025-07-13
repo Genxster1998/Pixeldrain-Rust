@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PixelDrain
+Name[en_US]=PixelDrain
+Comment=Upload and manage files with PixelDrain
+Comment[en_US]=Upload and manage files with PixelDrain
+Exec=pixeldrain
+Icon=pixeldrain
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=upload;file;transfer;pixeldrain;
+StartupWMClass=pixeldrain 

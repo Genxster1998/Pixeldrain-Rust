@@ -3,10 +3,15 @@
 name = "pixeldrain"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <you@example.com>"]
-description = "A cross-platform PixelDrain client with egui GUI"
+authors = ["Genxster1998"]
+description = "Upload and manage files with PixelDrain"
 license = "MIT"
-repository = "https://github.com/yourusername/pixeldrain-egui"
+repository = "https://github.com/Genxster1998/PixelDrain"
+keywords = ["upload", "file", "transfer", "pixeldrain"]
+categories = ["network-programming", "gui"]
+
+[build-dependencies]
+winres = "0.1"
 
 [dependencies]
 eframe = { version = "0.32", features = ["default_fonts"] }
