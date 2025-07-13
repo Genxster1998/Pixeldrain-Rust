@@ -250,68 +250,9 @@ impl PixelDrainClient {
 
         let file_size = file_path.metadata()?.len();
 
-        // Custom reader to report progress with optimized buffering
-        struct ProgressReader<R: Read> {
-            inner: R,
-            total: u64,
-            read: u64,
-            cb: Option<ProgressCallback>,
-            buffer: Vec<u8>,
-            buffer_pos: usize,
-            buffer_len: usize,
-        }
-        
-        impl<R: Read> ProgressReader<R> {
-            fn new(inner: R, total: u64, cb: Option<ProgressCallback>) -> Self {
-                Self {
-                    inner,
-                    total,
-                    read: 0,
-                    cb,
-                    buffer: vec![0; 64 * 1024], // 64KB buffer
-                    buffer_pos: 0,
-                    buffer_len: 0,
-                }
-            }
-        }
-        
-        impl<R: Read> Read for ProgressReader<R> {
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                // If buffer is empty, fill it
-                if self.buffer_pos >= self.buffer_len {
-                    self.buffer_len = self.inner.read(&mut self.buffer)?;
-                    self.buffer_pos = 0;
-                    if self.buffer_len == 0 {
-                        return Ok(0);
-                    }
-                }
-                
-                // Copy from buffer to output
-                let to_copy = std::cmp::min(buf.len(), self.buffer_len - self.buffer_pos);
-                buf[..to_copy].copy_from_slice(&self.buffer[self.buffer_pos..self.buffer_pos + to_copy]);
-                self.buffer_pos += to_copy;
-                self.read += to_copy as u64;
-                
-                // Report progress
-                if let Some(cb) = &self.cb {
-                    let mut cb = cb.lock().unwrap();
-                    let progress = if self.total > 0 {
-                        self.read as f32 / self.total as f32
-                    } else {
-                        0.0
-                    };
-                    cb(progress.min(1.0));
-                }
-                
-                Ok(to_copy)
-            }
-        }
-
-        // Retry logic similar to go-pd
+        // Retry logic with progress reset
         const MAX_RETRIES: usize = 3;
         const RETRY_DELAY: Duration = Duration::from_secs(3);
-        
-        let mut last_error = None;
         
         for attempt in 1..=MAX_RETRIES {
             if self.config.debug {
@@ -320,17 +261,19 @@ impl PixelDrainClient {
             
             // Reset progress at the start of each attempt
             if let Some(progress) = &progress {
-                let mut progress = progress.lock().unwrap();
-                progress(0.0);
+                if let Ok(mut progress) = progress.lock() {
+                    progress(0.0);
+                }
             }
-            
-            let reader = ProgressReader::new(
+
+            // Create a progress reader that works for file uploads
+            let progress_reader = ProgressReader::new_file(
                 File::open(file_path)?,
                 file_size,
                 progress.clone(),
             );
 
-            let part = multipart::Part::reader(reader)
+            let part = multipart::Part::reader(progress_reader)
                 .file_name(file_name.clone())
                 .mime_str("application/octet-stream")
                 .unwrap();
@@ -341,28 +284,25 @@ impl PixelDrainClient {
                 Ok(result) => {
                     // Reset progress to 100% when complete
                     if let Some(progress) = &progress {
-                        let mut progress = progress.lock().unwrap();
-                        progress(1.0);
+                        if let Ok(mut progress) = progress.lock() {
+                            progress(1.0);
+                        }
                     }
                     return Ok(result);
                 }
                 Err(e) => {
-                    last_error = Some(e);
-                    
-                    // Check if this is a retryable error (network/request body errors)
-                    let should_retry = match &last_error.as_ref().unwrap() {
+                    // Check if this is a retryable error
+                    let should_retry = match &e {
                         PixelDrainError::Reqwest(reqwest_err) => {
-                            // Retry on network errors, timeouts, and request body errors
                             reqwest_err.is_timeout() || 
                             reqwest_err.is_connect() || 
                             reqwest_err.is_request() ||
                             reqwest_err.to_string().contains("request or response body error")
                         }
                         PixelDrainError::Api(api_err) => {
-                            // Retry on 5xx server errors
                             api_err.status.is_server_error()
                         }
-                        _ => false, // Don't retry other errors
+                        _ => false,
                     };
                     
                     if should_retry && attempt < MAX_RETRIES {
@@ -372,18 +312,18 @@ impl PixelDrainClient {
                         std::thread::sleep(RETRY_DELAY);
                         continue;
                     } else {
-                        break;
+                        return Err(e);
                     }
                 }
             }
         }
         
-        // If we get here, all retries failed
-        Err(last_error.unwrap_or_else(|| PixelDrainError::Api(ApiError {
+        // This should never be reached, but just in case
+        Err(PixelDrainError::Api(ApiError {
             status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             value: "error".to_string(),
             message: "Upload failed after all retry attempts".to_string(),
-        })))
+        }))
     }
 
     /// Download a file using GET /api/file/{id}
@@ -572,69 +512,9 @@ impl PixelDrainClient {
 
         let file_size = file_path.metadata()?.len();
 
-        // Custom reader to report progress with optimized buffering
-        struct ProgressReader<R: Read> {
-            inner: R,
-            total: u64,
-            read: u64,
-            cb: Option<ProgressCallback>,
-            buffer: Vec<u8>,
-            buffer_pos: usize,
-            buffer_len: usize,
-        }
-        
-        impl<R: Read> ProgressReader<R> {
-            #[allow(dead_code)]
-            fn new(inner: R, total: u64, cb: Option<ProgressCallback>) -> Self {
-                Self {
-                    inner,
-                    total,
-                    read: 0,
-                    cb,
-                    buffer: vec![0; 64 * 1024], // 64KB buffer
-                    buffer_pos: 0,
-                    buffer_len: 0,
-                }
-            }
-        }
-        
-        impl<R: Read> Read for ProgressReader<R> {
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                // If buffer is empty, fill it
-                if self.buffer_pos >= self.buffer_len {
-                    self.buffer_len = self.inner.read(&mut self.buffer)?;
-                    self.buffer_pos = 0;
-                    if self.buffer_len == 0 {
-                        return Ok(0);
-                    }
-                }
-                
-                // Copy from buffer to output
-                let to_copy = std::cmp::min(buf.len(), self.buffer_len - self.buffer_pos);
-                buf[..to_copy].copy_from_slice(&self.buffer[self.buffer_pos..self.buffer_pos + to_copy]);
-                self.buffer_pos += to_copy;
-                self.read += to_copy as u64;
-                
-                // Report progress
-                if let Some(cb) = &self.cb {
-                    let mut cb = cb.lock().unwrap();
-                    let progress = if self.total > 0 {
-                        self.read as f32 / self.total as f32
-                    } else {
-                        0.0
-                    };
-                    cb(progress.min(1.0));
-                }
-                
-                Ok(to_copy)
-            }
-        }
-
-        // Retry logic similar to go-pd
+        // Retry logic with progress reset
         const MAX_RETRIES: usize = 3;
         const RETRY_DELAY: Duration = Duration::from_secs(3);
-        
-        let mut last_error = None;
         
         for attempt in 1..=MAX_RETRIES {
             if self.config.debug {
@@ -643,17 +523,19 @@ impl PixelDrainClient {
             
             // Reset progress at the start of each attempt
             if let Some(progress) = &progress {
-                let mut progress = progress.lock().unwrap();
-                progress(0.0);
+                if let Ok(mut progress) = progress.lock() {
+                    progress(0.0);
+                }
             }
-            
-            let reader = ProgressReader::new(
+
+            // Create a progress reader that works for file uploads
+            let progress_reader = ProgressReader::new_file(
                 File::open(file_path)?,
                 file_size,
                 progress.clone(),
             );
 
-            let body = reqwest::blocking::Body::sized(reader, file_size);
+            let body = reqwest::blocking::Body::sized(progress_reader, file_size);
             
             match self.do_request::<UploadResponse>(
                 reqwest::Method::PUT, 
@@ -663,16 +545,15 @@ impl PixelDrainClient {
                 Ok(result) => {
                     // Reset progress to 100% when complete
                     if let Some(progress) = &progress {
-                        let mut progress = progress.lock().unwrap();
-                        progress(1.0);
+                        if let Ok(mut progress) = progress.lock() {
+                            progress(1.0);
+                        }
                     }
                     return Ok(result);
                 }
                 Err(e) => {
-                    last_error = Some(e);
-                    
                     // Check if this is a retryable error
-                    let should_retry = match &last_error.as_ref().unwrap() {
+                    let should_retry = match &e {
                         PixelDrainError::Reqwest(reqwest_err) => {
                             reqwest_err.is_timeout() || 
                             reqwest_err.is_connect() || 
@@ -692,18 +573,18 @@ impl PixelDrainClient {
                         std::thread::sleep(RETRY_DELAY);
                         continue;
                     } else {
-                        break;
+                        return Err(e);
                     }
                 }
             }
         }
         
-        // If we get here, all retries failed
-        Err(last_error.unwrap_or_else(|| PixelDrainError::Api(ApiError {
+        // This should never be reached, but just in case
+        Err(PixelDrainError::Api(ApiError {
             status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             value: "error".to_string(),
             message: "PUT Upload failed after all retry attempts".to_string(),
-        })))
+        }))
     }
 
     /// Upload a stream using PUT /api/file/{filename} (like Go CLI)
@@ -714,40 +595,8 @@ impl PixelDrainClient {
         progress: Option<ProgressCallback>,
     ) -> Result<UploadResponse, PixelDrainError> {
         
-        // Create a progress reader that wraps the input stream
-        struct ProgressReader<R: Read> {
-            inner: R,
-            read: u64,
-            cb: Option<ProgressCallback>,
-        }
-
-        impl<R: Read> ProgressReader<R> {
-            fn new(inner: R, cb: Option<ProgressCallback>) -> Self {
-                Self {
-                    inner,
-                    read: 0,
-                    cb,
-                }
-            }
-        }
-
-        impl<R: Read> Read for ProgressReader<R> {
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                let bytes_read = self.inner.read(buf)?;
-                self.read += bytes_read as u64;
-                
-                // Call progress callback (estimate based on bytes read)
-                if let Some(ref mut cb) = self.cb {
-                    // Estimate progress: assume 100MB = 100% for unknown sizes
-                    let estimated_progress = (self.read as f32 / (100 * 1024 * 1024) as f32).min(1.0);
-                    cb.lock().unwrap()(estimated_progress);
-                }
-                
-                Ok(bytes_read)
-            }
-        }
-
-        let progress_reader = ProgressReader::new(reader, progress);
+        // Create a progress reader that works for streaming uploads
+        let progress_reader = ProgressReader::new_stream(reader, progress);
         
         // Build the PUT request with streaming body
         let mut request = self.build_request(reqwest::Method::PUT, &format!("file/{}", urlencoding::encode(filename)));
@@ -1387,7 +1236,65 @@ impl From<url::ParseError> for PixelDrainError {
 }
 
 // ============================================================================
-// Progress Callback Type
+// Progress Tracking
 // ============================================================================
 
 pub type ProgressCallback = Arc<Mutex<dyn FnMut(f32) + Send>>;
+
+/// Generic progress reader that works for both file-based and streaming uploads
+struct ProgressReader<R: Read> {
+    inner: R,
+    total: Option<u64>, // None for streaming uploads
+    read: u64,
+    cb: Option<ProgressCallback>,
+}
+
+impl<R: Read> ProgressReader<R> {
+    fn new_file(inner: R, total: u64, cb: Option<ProgressCallback>) -> Self {
+        Self {
+            inner,
+            total: Some(total),
+            read: 0,
+            cb,
+        }
+    }
+    
+    fn new_stream(inner: R, cb: Option<ProgressCallback>) -> Self {
+        Self {
+            inner,
+            total: None,
+            read: 0,
+            cb,
+        }
+    }
+    
+    fn call_progress(&mut self, progress: f32) {
+        if let Some(cb) = &mut self.cb {
+            if let Ok(mut callback) = cb.lock() {
+                callback(progress);
+            }
+        }
+    }
+}
+
+impl<R: Read> Read for ProgressReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bytes_read = self.inner.read(buf)?;
+        self.read += bytes_read as u64;
+        
+        // Calculate progress
+        if let Some(total) = self.total {
+            if total > 0 {
+                let progress = (self.read as f32 / total as f32).min(1.0);
+                self.call_progress(progress);
+            }
+        } else {
+            // For streaming, estimate progress based on bytes read
+            // This is a rough estimate - could be improved with better heuristics
+            let estimated_progress = (self.read as f32 / 1024.0 / 1024.0).min(0.95); // Cap at 95% for streaming
+            self.call_progress(estimated_progress);
+        }
+        
+        Ok(bytes_read)
+    }
+}

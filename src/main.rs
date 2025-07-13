@@ -107,11 +107,11 @@ struct PixelDrainApp {
     // UI State
     show_error: bool,
     error_message: String,
-    lists: Vec<pixeldrain_api::ListInfo>,
+    lists: Arc<Mutex<Vec<pixeldrain_api::ListInfo>>>,
     selected_list_id: Option<String>,
     new_list_title: String,
     new_list_files: Vec<pixeldrain_api::ListFile>,
-    list_error: Option<String>,
+    list_error: Arc<Mutex<Option<String>>>,
     // Add fields for editing
     edit_list_title: String,
     edit_list_files: Vec<pixeldrain_api::ListFile>,
@@ -164,11 +164,11 @@ impl Default for PixelDrainApp {
             settings_download_location: String::new(),
             show_error: false,
             error_message: String::new(),
-            lists: Vec::new(),
+            lists: Arc::new(Mutex::new(Vec::new())),
             selected_list_id: None,
             new_list_title: String::new(),
             new_list_files: Vec::new(),
-            list_error: None,
+            list_error: Arc::new(Mutex::new(None)),
             // Add fields for editing
             edit_list_title: String::new(),
             edit_list_files: Vec::new(),
@@ -776,17 +776,22 @@ impl PixelDrainApp {
         let list_update_loading = *self.list_update_loading.lock().unwrap();
         let list_delete_loading = *self.list_delete_loading.lock().unwrap();
         
+        // Read current lists and error state
+        let lists = self.lists.lock().unwrap().clone();
+        let list_error = self.list_error.lock().unwrap().clone();
+        
         ui.heading("Your Lists");
-        
-        if lists_loading {
-            self.render_loading_spinner(ui, "Loading lists...");
-        } else {
-            if ui.button("🔄 Refresh Lists").clicked() {
-                refresh_lists = true;
+        ui.horizontal(|ui| {
+            if lists_loading {
+                self.render_loading_spinner(ui, "Refreshing lists...");
+            } else {
+                if ui.button("🔄 Refresh Lists").clicked() {
+                    refresh_lists = true;
+                }
             }
-        }
+        });
         
-        if let Some(err) = &self.list_error {
+        if let Some(err) = &list_error {
             ui.colored_label(egui::Color32::RED, err);
         }
         
@@ -826,11 +831,11 @@ impl PixelDrainApp {
             self.render_loading_spinner(ui, "Deleting list...");
         }
         
-        if self.lists.is_empty() && !lists_loading {
+        if lists.is_empty() && !lists_loading {
             ui.label("No lists found. Click 'Refresh Lists' or create a new list.");
-        } else if !self.lists.is_empty() {
+        } else if !lists.is_empty() {
             egui::ScrollArea::vertical().max_height(200.0).id_salt("user_lists_scroll").show(ui, |ui| {
-                for list in &self.lists {
+                for list in &lists {
                     let selected = self.selected_list_id.as_ref().map_or(false, |id| id == &list.id);
                     if ui.selectable_label(selected, &list.title).clicked() {
                         select_list_data = Some((list.id.clone(), list.title.clone(), Vec::new())); // Empty files for now
@@ -846,7 +851,7 @@ impl PixelDrainApp {
         
         // Edit section
         if let Some(selected_id) = &self.selected_list_id {
-            if let Some(list) = self.lists.iter().find(|l| &l.id == selected_id) {
+            if let Some(list) = lists.iter().find(|l| &l.id == selected_id) {
                 ui.separator();
                 ui.heading(format!("Edit List: {}", list.title));
                 
@@ -943,52 +948,44 @@ impl PixelDrainApp {
         // Set loading state
         *self.lists_loading.lock().unwrap() = true;
         
-        // Add retry logic similar to upload/download functions
-        const MAX_RETRIES: usize = 3;
-        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+        let lists_loading = self.lists_loading.clone();
+        let lists = self.lists.clone();
+        let list_error = self.list_error.clone();
         
-        let client = self.make_api_client();
-        let mut last_error = None;
-        
-        for attempt in 1..=MAX_RETRIES {
-            match client.get_user_lists() {
-                Ok(resp) => {
-                    self.lists = resp.lists;
-                    self.list_error = None;
-                    *self.lists_loading.lock().unwrap() = false;
-                    return;
-                }
-                Err(e) => {
-                    last_error = Some(e);
-                    
-                    // Check if this is a retryable error
-                    let should_retry = match &last_error.as_ref().unwrap() {
-                        pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
-                            reqwest_err.is_timeout() || 
-                            reqwest_err.is_connect() || 
-                            reqwest_err.is_request() ||
-                            reqwest_err.to_string().contains("request or response body error")
+        thread::spawn(move || {
+            // Use the retry utility
+            let result = Self::retry_pixeldrain_operation(
+                || {
+                    // Create API client using environment variable
+                    let config = if let Ok(env_key) = env::var("PIXELDRAIN_API_KEY") {
+                        if !env_key.is_empty() {
+                            pixeldrain_api::PixelDrainConfig::default().with_api_key(env_key)
+                        } else {
+                            pixeldrain_api::PixelDrainConfig::default()
                         }
-                        pixeldrain_api::PixelDrainError::Api(api_err) => {
-                            api_err.status.is_server_error()
-                        }
-                        _ => false,
+                    } else {
+                        pixeldrain_api::PixelDrainConfig::default()
                     };
                     
-                    if should_retry && attempt < MAX_RETRIES {
-                        std::thread::sleep(RETRY_DELAY);
-                        continue;
-                    } else {
-                        break;
-                    }
+                    let client = pixeldrain_api::PixelDrainClient::new(config)?;
+                    client.get_user_lists()
+                },
+                3,
+                std::time::Duration::from_secs(3),
+            );
+            
+            match result {
+                Ok(response) => {
+                    *lists.lock().unwrap() = response.lists;
+                    *list_error.lock().unwrap() = None;
+                }
+                Err(error) => {
+                    *list_error.lock().unwrap() = Some(format!("Failed to fetch lists: {}", error));
                 }
             }
-        }
-        
-        // If we get here, all retries failed
-        self.list_error = Some(format!("Failed to fetch lists after {} attempts: {}", 
-            MAX_RETRIES, last_error.unwrap()));
-        *self.lists_loading.lock().unwrap() = false;
+            
+            *lists_loading.lock().unwrap() = false;
+        });
     }
     fn create_list(&mut self) {
         // Set loading state
@@ -1008,10 +1005,10 @@ impl PixelDrainApp {
         for attempt in 1..=MAX_RETRIES {
             match client.create_list(&req) {
                 Ok(list) => {
-                    self.lists.push(list);
+                    self.lists.lock().unwrap().push(list);
                     self.new_list_title.clear();
                     self.new_list_files.clear();
-                    self.list_error = None;
+                    *self.list_error.lock().unwrap() = None;
                     *self.list_create_loading.lock().unwrap() = false;
                     return;
                 }
@@ -1043,7 +1040,7 @@ impl PixelDrainApp {
         }
         
         // If we get here, all retries failed
-        self.list_error = Some(format!("Failed to create list after {} attempts: {}", 
+        *self.list_error.lock().unwrap() = Some(format!("Failed to create list after {} attempts: {}", 
             MAX_RETRIES, last_error.unwrap()));
         *self.list_create_loading.lock().unwrap() = false;
     }
@@ -1061,9 +1058,9 @@ impl PixelDrainApp {
         for attempt in 1..=MAX_RETRIES {
             match client.delete_list(list_id) {
                 Ok(_) => {
-                    self.lists.retain(|l| l.id != list_id);
+                    self.lists.lock().unwrap().retain(|l| l.id != list_id);
                     self.selected_list_id = None;
-                    self.list_error = None;
+                    *self.list_error.lock().unwrap() = None;
                     *self.list_delete_loading.lock().unwrap() = false;
                     return;
                 }
@@ -1095,7 +1092,7 @@ impl PixelDrainApp {
         }
         
         // If we get here, all retries failed
-        self.list_error = Some(format!("Failed to delete list after {} attempts: {}", 
+        *self.list_error.lock().unwrap() = Some(format!("Failed to delete list after {} attempts: {}", 
             MAX_RETRIES, last_error.unwrap()));
         *self.list_delete_loading.lock().unwrap() = false;
     }
@@ -1117,10 +1114,10 @@ impl PixelDrainApp {
         for attempt in 1..=MAX_RETRIES {
             match client.update_list(list_id, &req) {
                 Ok(updated) => {
-                    if let Some(list) = self.lists.iter_mut().find(|l| l.id == list_id) {
+                    if let Some(list) = self.lists.lock().unwrap().iter_mut().find(|l| l.id == list_id) {
                         *list = updated;
                     }
-                    self.list_error = None;
+                    *self.list_error.lock().unwrap() = None;
                     *self.list_update_loading.lock().unwrap() = false;
                     return;
                 }
@@ -1152,7 +1149,7 @@ impl PixelDrainApp {
         }
         
         // If we get here, all retries failed
-        self.list_error = Some(format!("Failed to update list after {} attempts: {}", 
+        *self.list_error.lock().unwrap() = Some(format!("Failed to update list after {} attempts: {}", 
             MAX_RETRIES, last_error.unwrap()));
         *self.list_update_loading.lock().unwrap() = false;
     }
@@ -2147,6 +2144,51 @@ impl PixelDrainApp {
             self.state.lock().unwrap().last_error = Some("No API key available (check settings or environment variable PIXELDRAIN_API_KEY). Cannot fetch user info.".to_string());
         }
     }
+
+    // Retry utility specifically for PixelDrainError to eliminate code duplication
+    fn retry_pixeldrain_operation<F, T>(
+        operation: F,
+        max_retries: usize,
+        retry_delay: std::time::Duration,
+    ) -> Result<T, pixeldrain_api::PixelDrainError>
+    where
+        F: Fn() -> Result<T, pixeldrain_api::PixelDrainError>,
+    {
+        let mut last_error = None;
+        
+        for attempt in 1..=max_retries {
+            match operation() {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    // Check if this is a retryable error
+                    let should_retry = match &e {
+                        pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                            reqwest_err.is_timeout() || 
+                            reqwest_err.is_connect() || 
+                            reqwest_err.is_request() ||
+                            reqwest_err.to_string().contains("request or response body error")
+                        }
+                        pixeldrain_api::PixelDrainError::Api(api_err) => {
+                            api_err.status.is_server_error()
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_retry && attempt < max_retries {
+                        std::thread::sleep(retry_delay);
+                        continue;
+                    } else {
+                        last_error = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        Err(last_error.unwrap())
+    }
+
+
 }
 
 fn main() -> Result<(), eframe::Error> {
