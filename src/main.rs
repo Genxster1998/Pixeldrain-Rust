@@ -37,7 +37,7 @@ use pixeldrain_api::{
     UserInfo,
 };
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct AppState {
     api_key: String,
     download_location: String,
@@ -49,6 +49,22 @@ struct AppState {
     // Debug info
     debug_messages: Vec<String>,
     last_operation_time: Option<DateTime<Utc>>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            download_location: PixelDrainApp::get_default_download_location(),
+            upload_history: Vec::new(),
+            download_history: Vec::new(),
+            last_error: None,
+            file_list: Vec::new(),
+            user_info: None,
+            debug_messages: Vec::new(),
+            last_operation_time: None,
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -74,12 +90,13 @@ struct PixelDrainApp {
     // Upload
     upload_progress: Arc<Mutex<f32>>,
     upload_file: Option<PathBuf>,
+    upload_custom_filename: String,
+    upload_files: Vec<PathBuf>, // Multiple files for upload
     upload_thread_running: Arc<Mutex<bool>>,
     // Download
     download_url: String,
     download_progress: Arc<Mutex<f32>>,
     download_thread_running: Arc<Mutex<bool>>,
-    download_save_path: Option<PathBuf>,
     // Settings input state
     settings_api_key: String,
     settings_download_location: String,
@@ -89,6 +106,22 @@ struct PixelDrainApp {
     // Debug
     show_debug: bool,
     debug_log: Vec<String>,
+    lists: Vec<pixeldrain_api::ListInfo>,
+    selected_list_id: Option<String>,
+    new_list_title: String,
+    new_list_files: Vec<pixeldrain_api::ListFile>,
+    list_error: Option<String>,
+    // Add fields for editing
+    edit_list_title: String,
+    edit_list_files: Vec<pixeldrain_api::ListFile>,
+    // Loading states
+    files_loading: Arc<Mutex<bool>>,
+    file_delete_loading: Arc<Mutex<bool>>,
+    lists_loading: Arc<Mutex<bool>>,
+    list_create_loading: Arc<Mutex<bool>>,
+    list_update_loading: Arc<Mutex<bool>>,
+    list_delete_loading: Arc<Mutex<bool>>,
+    user_info_loading: Arc<Mutex<bool>>,
 }
 
 #[derive(PartialEq)]
@@ -96,9 +129,14 @@ enum Tab {
     Upload,
     Download,
     List,
+    Lists, // New Lists tab
     Settings,
     About,
 }
+
+
+
+
 
 impl Default for Tab {
     fn default() -> Self {
@@ -113,17 +151,34 @@ impl Default for PixelDrainApp {
             tab: Tab::default(),
             upload_progress: Arc::new(Mutex::new(0.0)),
             upload_file: None,
+            upload_custom_filename: String::new(),
+            upload_files: Vec::new(),
             upload_thread_running: Arc::new(Mutex::new(false)),
             download_url: String::new(),
             download_progress: Arc::new(Mutex::new(0.0)),
             download_thread_running: Arc::new(Mutex::new(false)),
-            download_save_path: None,
             settings_api_key: String::new(),
             settings_download_location: String::new(),
             show_error: false,
             error_message: String::new(),
             show_debug: false,
             debug_log: Vec::new(),
+            lists: Vec::new(),
+            selected_list_id: None,
+            new_list_title: String::new(),
+            new_list_files: Vec::new(),
+            list_error: None,
+            // Add fields for editing
+            edit_list_title: String::new(),
+            edit_list_files: Vec::new(),
+            // Loading states
+            files_loading: Arc::new(Mutex::new(false)),
+            file_delete_loading: Arc::new(Mutex::new(false)),
+            lists_loading: Arc::new(Mutex::new(false)),
+            list_create_loading: Arc::new(Mutex::new(false)),
+            list_update_loading: Arc::new(Mutex::new(false)),
+            list_delete_loading: Arc::new(Mutex::new(false)),
+            user_info_loading: Arc::new(Mutex::new(false)),
         };
         
         // Load settings on startup
@@ -143,22 +198,81 @@ impl App for PixelDrainApp {
 
 impl PixelDrainApp {
     fn add_debug_log(&mut self, message: String) {
-        let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
+        let timestamp = chrono::Utc::now().format("%H:%M:%S");
         let log_entry = format!("[{}] {}", timestamp, message);
+        
+        // Add to debug log
         self.debug_log.push(log_entry.clone());
         
-        // Keep only last 50 debug messages
-        if self.debug_log.len() > 50 {
+        // Keep only last 100 entries
+        if self.debug_log.len() > 100 {
             self.debug_log.remove(0);
         }
         
-        // Also add to state for persistence
+        // Also add to state debug messages
         let mut state = self.state.lock().unwrap();
         state.debug_messages.push(log_entry);
+        state.last_operation_time = Some(chrono::Utc::now());
+        
+        // Keep only last 50 entries in state
         if state.debug_messages.len() > 50 {
             state.debug_messages.remove(0);
         }
-        state.last_operation_time = Some(chrono::Utc::now());
+    }
+
+    /// Get API key with settings priority
+    /// Returns the stored API key if set, otherwise the environment variable
+    fn get_api_key(&self) -> Option<String> {
+        // First check stored API key
+        let state = self.state.lock().unwrap();
+        if !state.api_key.is_empty() {
+            return Some(state.api_key.clone());
+        }
+        
+        // Fall back to environment variable
+        if let Ok(env_key) = env::var("PIXELDRAIN_API_KEY") {
+            if !env_key.is_empty() {
+                return Some(env_key);
+            }
+        }
+        
+        None
+    }
+
+    /// Check if API key is available (either from settings or environment)
+    fn has_api_key(&self) -> bool {
+        self.get_api_key().is_some()
+    }
+
+    /// Check if environment variable is set (used as fallback)
+    fn has_env_api_key(&self) -> bool {
+        env::var("PIXELDRAIN_API_KEY").is_ok()
+    }
+
+    fn render_loading_spinner(&self, ui: &mut egui::Ui, text: &str) {
+        ui.horizontal(|ui| {
+            ui.ctx().request_repaint(); // Keep the spinner animated
+            let time = ui.input(|i| i.time);
+            let angle = time as f32 * 2.0; // Rotation speed
+            
+            // Draw a simple rotating circle
+            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), egui::Sense::hover());
+            let painter = ui.painter();
+            let center = rect.center();
+            let radius = 6.0;
+            
+            // Draw rotating arc
+            for i in 0..8 {
+                let a = angle + i as f32 * std::f32::consts::PI / 4.0;
+                let alpha = (1.0 - i as f32 / 8.0) * 255.0;
+                let color = egui::Color32::from_gray((alpha as u8).max(50));
+                let start = center + egui::Vec2::new(radius * a.cos(), radius * a.sin());
+                let end = center + egui::Vec2::new((radius - 2.0) * a.cos(), (radius - 2.0) * a.sin());
+                painter.line_segment([start, end], egui::Stroke::new(2.0, color));
+            }
+            
+            ui.label(text);
+        });
     }
 
     fn render_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -170,6 +284,7 @@ impl PixelDrainApp {
                 (Tab::Upload, "📤 Upload"),
                 (Tab::Download, "📥 Download"),
                 (Tab::List, "📋 Files"),
+                (Tab::Lists, "📚 Lists"), // New Lists tab
                 (Tab::Settings, "⚙ Settings"),
                 (Tab::About, "ℹ About"),
             ] {
@@ -192,6 +307,7 @@ impl PixelDrainApp {
             Tab::Upload => self.upload_tab(ctx, ui),
             Tab::Download => self.download_tab(ctx, ui),
             Tab::List => self.list_tab(ui),
+            Tab::Lists => self.lists_tab(ui), // New Lists tab
             Tab::Settings => self.settings_tab(ui),
             Tab::About => self.about_tab(ui),
         }
@@ -218,7 +334,7 @@ impl PixelDrainApp {
         let debug_messages = self.debug_log.clone();
         
         // Show recent debug messages
-        egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(200.0).id_salt("debug_messages_scroll").show(ui, |ui| {
             for message in &debug_messages {
                 ui.label(message);
             }
@@ -267,24 +383,73 @@ impl PixelDrainApp {
                         ui.add(egui::Label::new(path.display().to_string()).wrap());
                     });
                     ui.label(format!("📏 Size: {}", self.format_file_size(path)));
+                    
+                    // File rename option
+                    ui.separator();
+                    ui.label("📝 Rename file (optional):");
+                    let original_name = path.file_name().unwrap_or_default().to_string_lossy();
+                    ui.horizontal(|ui| {
+                        if self.upload_custom_filename.is_empty() {
+                            ui.text_edit_singleline(&mut self.upload_custom_filename);
+                            if ui.button("Use original").clicked() {
+                                self.upload_custom_filename = original_name.to_string();
+                            }
+                        } else {
+                            ui.text_edit_singleline(&mut self.upload_custom_filename);
+                            if ui.button("Clear").clicked() {
+                                self.upload_custom_filename.clear();
+                            }
+                        }
+                    });
+                    if !self.upload_custom_filename.is_empty() {
+                        ui.label(format!("Will upload as: {}", self.upload_custom_filename));
+                    } else {
+                        ui.label(format!("Will upload as: {}", original_name));
+                    }
+                } else if !self.upload_files.is_empty() {
+                    // Display multiple files
+                    ui.add_space(5.0);
+                    ui.label(format!("📁 {} files selected:", self.upload_files.len()));
+                    egui::ScrollArea::vertical().max_height(100.0).id_salt("upload_files_scroll").show(ui, |ui| {
+                        for (i, path) in self.upload_files.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{}. {}", i + 1, path.file_name().unwrap_or_default().to_string_lossy()));
+                                ui.label(format!("({})", self.format_file_size(path)));
+                            });
+                        }
+                    });
                 } else {
                     ui.label("📁 No file selected");
                 }
                 
-                if ui.button("📁 Choose File").clicked() {
-                    if let Some(path) = FileDialog::new().pick_file() {
-                        self.upload_file = Some(path);
-                        // Reset progress when new file is selected
+                if ui.button("📁 Select Files").clicked() {
+                    if let Some(paths) = FileDialog::new().pick_files() {
+                        if paths.len() == 1 {
+                            // Single file selected
+                            self.upload_file = Some(paths[0].clone());
+                            self.upload_files.clear();
+                        } else {
+                            // Multiple files selected
+                            self.upload_files = paths;
+                            self.upload_file = None;
+                        }
+                        self.upload_custom_filename.clear();
+                        // Reset progress
                         *self.upload_progress.lock().unwrap() = 0.0;
                         // Clear any previous errors
                         self.state.lock().unwrap().last_error = None;
                     }
                 }
 
+                let is_running = *self.upload_thread_running.lock().unwrap();
                 if let Some(_path) = &self.upload_file {
-                    let is_running = *self.upload_thread_running.lock().unwrap();
                     if ui.add_enabled(!is_running, egui::Button::new(if is_running { "⏳ Uploading..." } else { "🚀 Upload" })).clicked() {
                         self.start_upload(self.upload_file.clone().unwrap(), ctx.clone());
+                    }
+                } else if !self.upload_files.is_empty() {
+                    let button_text = if is_running { "⏳ Uploading..." } else { &format!("🚀 Upload {} Files", self.upload_files.len()) };
+                    if ui.add_enabled(!is_running, egui::Button::new(button_text)).clicked() {
+                        self.start_multiple_upload(self.upload_files.clone(), ctx.clone());
                     }
                 } else {
                     ui.add_enabled_ui(false, |ui| {
@@ -309,13 +474,23 @@ impl PixelDrainApp {
         // Drag and drop support
         if ctx.input(|i| !i.raw.dropped_files.is_empty()) {
             let dropped = ctx.input(|i| i.raw.dropped_files.clone());
-            if let Some(file) = dropped.iter().find_map(|f| f.path.clone()) {
-                self.upload_file = Some(file);
-                // Reset progress when new file is dropped
-                *self.upload_progress.lock().unwrap() = 0.0;
-                // Clear any previous errors
-                self.state.lock().unwrap().last_error = None;
+            let files: Vec<PathBuf> = dropped.iter().filter_map(|f| f.path.clone()).collect();
+            
+            if files.len() == 1 {
+                // Single file dropped
+                self.upload_file = Some(files[0].clone());
+                self.upload_files.clear();
+            } else if files.len() > 1 {
+                // Multiple files dropped
+                self.upload_files = files;
+                self.upload_file = None;
             }
+            
+            self.upload_custom_filename.clear();
+            // Reset progress
+            *self.upload_progress.lock().unwrap() = 0.0;
+            // Clear any previous errors
+            self.state.lock().unwrap().last_error = None;
         }
 
         ui.separator();
@@ -327,7 +502,7 @@ impl PixelDrainApp {
         if state.upload_history.is_empty() {
             ui.label("No uploads yet");
         } else {
-            egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(200.0).id_salt("upload_history_scroll").show(ui, |ui| {
                 for entry in state.upload_history.iter().rev().take(5) {
                     ui.horizontal(|ui| {
                         ui.label(format!("📄 {}", entry.filename));
@@ -368,31 +543,21 @@ impl PixelDrainApp {
             });
             
             // Download button
-            let can_download = !self.download_url.is_empty() && self.download_save_path.is_some();
+            let can_download = !self.download_url.is_empty();
             if ui.add_enabled(can_download, egui::Button::new("⬇ Download")).clicked() && !*self.download_thread_running.lock().unwrap() {
                 self.start_download();
             }
 
-            // Folder picker and path on same line with better wrapping
-            ui.horizontal(|ui| {
-                if ui.button("📁").on_hover_text("Choose Folder").clicked() {
-                    if let Some(folder) = FileDialog::new().pick_folder() {
-                        self.download_save_path = Some(folder);
-                    }
+            // Show download location info
+            let download_location = {
+                let state = self.state.lock().unwrap();
+                if !state.download_location.is_empty() {
+                    state.download_location.clone()
+                } else {
+                    "Default download location not set".to_string()
                 }
-                
-                // Folder path display with improved wrapping
-                let loc = self
-                    .download_save_path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "Choose download folder...".to_string());
-                
-                // Use horizontal_wrapped for better text wrapping
-                ui.horizontal_wrapped(|ui| {
-                    ui.add(egui::Label::new(loc).wrap());
-                });
-            });
+            };
+            ui.label(format!("📁 Download location: {}", download_location));
             
             // Progress/status
             let progress = *self.download_progress.lock().unwrap();
@@ -411,7 +576,7 @@ impl PixelDrainApp {
         if state.download_history.is_empty() {
             ui.label("No downloads yet");
         } else {
-            egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(200.0).id_salt("download_history_scroll").show(ui, |ui| {
                 for entry in state.download_history.iter().rev().take(5) {
                     ui.horizontal(|ui| {
                         ui.label(format!("📄 {}", entry.filename));
@@ -437,18 +602,28 @@ impl PixelDrainApp {
         }
 
         let mut refresh_clicked = false;
+        let files_loading = *self.files_loading.lock().unwrap();
+        let file_delete_loading = *self.file_delete_loading.lock().unwrap();
+        
         ui.horizontal(|ui| {
             ui.label("Your Files");
-            if ui.button("🔄 Refresh").clicked() {
-                refresh_clicked = true;
+            if files_loading {
+                self.render_loading_spinner(ui, "Loading files...");
+            } else {
+                if ui.button("🔄 Refresh").clicked() {
+                    refresh_clicked = true;
+                }
             }
         });
 
+        if file_delete_loading {
+            self.render_loading_spinner(ui, "Deleting file...");
+        }
+
         // Check API key status
         let (api_key_set, env_key_set) = {
-            let state = self.state.lock().unwrap();
-            let api_key_set = !state.api_key.is_empty();
-            let env_key_set = env::var("PIXELDRAIN_API_KEY").is_ok();
+            let api_key_set = self.has_api_key();
+            let env_key_set = self.has_env_api_key();
             (api_key_set, env_key_set)
         };
 
@@ -456,19 +631,19 @@ impl PixelDrainApp {
         let file_list = state.file_list.clone();
         drop(state); // Release the lock early
         
-        if file_list.is_empty() {
+        if file_list.is_empty() && !files_loading {
             if !api_key_set && !env_key_set {
                 ui.colored_label(egui::Color32::YELLOW, "⚠ No API key configured");
-                ui.label("Set your API key in Settings or use PIXELDRAIN_API_KEY environment variable");
+                ui.label("Set your API key in Settings or use PIXELDRAIN_API_KEY environment variable (settings override environment)");
                 ui.label("Get your API key from https://pixeldrain.com/user/settings");
             } else if api_key_set || env_key_set {
                 ui.label("No files found. Click 'Refresh' to load your files.");
             }
-        } else {
+        } else if !file_list.is_empty() {
             let mut copy_clicked = None;
             let mut delete_clicked = None;
             
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("files_list_scroll").show(ui, |ui| {
                 for file in &file_list {
                     // First line: File name and stats
                     ui.horizontal(|ui| {
@@ -490,7 +665,7 @@ impl PixelDrainApp {
                             copy_clicked = Some(file.id.clone());
                         }
                         
-                        if ui.button("🗑 Delete").clicked() {
+                        if !file_delete_loading && ui.button("🗑 Delete").clicked() {
                             delete_clicked = Some(file.id.clone());
                         }
                     });
@@ -517,6 +692,416 @@ impl PixelDrainApp {
             self.add_debug_log("Refreshing file list".to_string());
             self.refresh_file_list();
         }
+    }
+
+    fn lists_tab(&mut self, ui: &mut egui::Ui) {
+        // Collect all actions to perform after UI rendering
+        let mut refresh_lists = false;
+        let mut create_list = false;
+        let mut delete_list_id: Option<String> = None;
+        let mut select_list_data: Option<(String, String, Vec<pixeldrain_api::ListFile>)> = None;
+        let mut new_list_file_changes: Vec<(String, bool)> = Vec::new(); // (file_id, add_or_remove)
+        let mut edit_list_file_changes: Vec<(String, bool)> = Vec::new();
+        let mut update_list_id: Option<String> = None;
+        let remove_from_existing: Vec<(String, String)> = Vec::new(); // (list_id, file_id)
+        
+        // Get loading states
+        let lists_loading = *self.lists_loading.lock().unwrap();
+        let list_create_loading = *self.list_create_loading.lock().unwrap();
+        let list_update_loading = *self.list_update_loading.lock().unwrap();
+        let list_delete_loading = *self.list_delete_loading.lock().unwrap();
+        
+        ui.heading("Your Lists");
+        
+        if lists_loading {
+            self.render_loading_spinner(ui, "Loading lists...");
+        } else {
+            if ui.button("🔄 Refresh Lists").clicked() {
+                refresh_lists = true;
+            }
+        }
+        
+        if let Some(err) = &self.list_error {
+            ui.colored_label(egui::Color32::RED, err);
+        }
+        
+        // Create section
+        ui.separator();
+        ui.heading("Create New List");
+        
+        if list_create_loading {
+            self.render_loading_spinner(ui, "Creating list...");
+        } else {
+            ui.horizontal(|ui| {
+                ui.label("Title:");
+                ui.text_edit_singleline(&mut self.new_list_title);
+            });
+            ui.label("Select files to add to the list:");
+            let file_list = self.state.lock().unwrap().file_list.clone();
+            
+            egui::ScrollArea::vertical().max_height(100.0).id_salt("new_list_files_scroll").show(ui, |ui| {
+                for file in &file_list {
+                    let mut selected = self.new_list_files.iter().any(|f| f.id == file.id);
+                    if ui.checkbox(&mut selected, &file.name).clicked() {
+                        new_list_file_changes.push((file.id.clone(), selected));
+                    }
+                }
+            });
+            
+            if ui.button("Create List").clicked() {
+                create_list = true;
+            }
+        }
+        
+        // Lists section
+        ui.separator();
+        ui.heading("Your Lists");
+        
+        if list_delete_loading {
+            self.render_loading_spinner(ui, "Deleting list...");
+        }
+        
+        if self.lists.is_empty() && !lists_loading {
+            ui.label("No lists found. Click 'Refresh Lists' or create a new list.");
+        } else if !self.lists.is_empty() {
+            egui::ScrollArea::vertical().max_height(200.0).id_salt("user_lists_scroll").show(ui, |ui| {
+                for list in &self.lists {
+                    let selected = self.selected_list_id.as_ref().map_or(false, |id| id == &list.id);
+                    if ui.selectable_label(selected, &list.title).clicked() {
+                        select_list_data = Some((list.id.clone(), list.title.clone(), Vec::new())); // Empty files for now
+                    }
+                    ui.label(format!("Files: {} | Created: {}", list.file_count, list.date_created.format("%Y-%m-%d %H:%M:%S")));
+                    if list.can_edit && !list_delete_loading && ui.button("🗑 Delete").clicked() {
+                        delete_list_id = Some(list.id.clone());
+                    }
+                    ui.separator();
+                }
+            });
+        }
+        
+        // Edit section
+        if let Some(selected_id) = &self.selected_list_id {
+            if let Some(list) = self.lists.iter().find(|l| &l.id == selected_id) {
+                ui.separator();
+                ui.heading(format!("Edit List: {}", list.title));
+                
+                if list_update_loading {
+                    self.render_loading_spinner(ui, "Updating list...");
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Title:");
+                        ui.text_edit_singleline(&mut self.edit_list_title);
+                    });
+                    ui.label("Add/remove files:");
+                    
+                    let file_list = self.state.lock().unwrap().file_list.clone();
+                    egui::ScrollArea::vertical().max_height(100.0).id_salt("edit_list_files_scroll").show(ui, |ui| {
+                        for file in &file_list {
+                            let mut selected = self.edit_list_files.iter().any(|f| f.id == file.id);
+                            if ui.checkbox(&mut selected, &file.name).clicked() {
+                                edit_list_file_changes.push((file.id.clone(), selected));
+                            }
+                        }
+                    });
+                    
+                    if ui.button("Save Changes").clicked() {
+                        update_list_id = Some(selected_id.clone());
+                    }
+                }
+                
+                ui.label(format!("Files in this list: {}", list.file_count));
+                ui.label("Note: Edit individual files by fetching the detailed list view.");
+                // TODO: Implement detailed list view when needed
+            }
+        }
+        
+        // Apply all collected actions
+        if refresh_lists {
+            self.refresh_lists();
+        }
+        
+        if create_list {
+            self.create_list();
+        }
+        
+        if let Some(list_id) = delete_list_id {
+            self.delete_list(&list_id);
+        }
+        
+        if let Some((list_id, title, files)) = select_list_data {
+            self.selected_list_id = Some(list_id);
+            self.edit_list_title = title;
+            self.edit_list_files = files;
+        }
+        
+        // Apply file changes to new list
+        for (file_id, add) in new_list_file_changes {
+            if add {
+                if !self.new_list_files.iter().any(|f| f.id == file_id) {
+                    self.new_list_files.push(pixeldrain_api::ListFile {
+                        id: file_id,
+                        description: String::new(), // Default empty description
+                    });
+                }
+            } else {
+                self.new_list_files.retain(|f| f.id != file_id);
+            }
+        }
+        
+        // Apply file changes to edit list
+        for (file_id, add) in edit_list_file_changes {
+            if add {
+                if !self.edit_list_files.iter().any(|f| f.id == file_id) {
+                    self.edit_list_files.push(pixeldrain_api::ListFile {
+                        id: file_id,
+                        description: String::new(), // Default empty description
+                    });
+                }
+            } else {
+                self.edit_list_files.retain(|f| f.id != file_id);
+            }
+        }
+        
+        if let Some(list_id) = update_list_id {
+            self.update_list(&list_id);
+        }
+        
+        // Handle removing files from existing lists
+        for (list_id, file_id) in remove_from_existing {
+            self.edit_list_files.retain(|f| f.id != file_id);
+            self.update_list(&list_id);
+        }
+    }
+    
+
+    fn refresh_lists(&mut self) {
+        // Set loading state
+        *self.lists_loading.lock().unwrap() = true;
+        
+        // Add retry logic similar to upload/download functions
+        const MAX_RETRIES: usize = 3;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+        
+        let client = self.make_api_client();
+        let mut last_error = None;
+        
+        for attempt in 1..=MAX_RETRIES {
+            match client.get_user_lists() {
+                Ok(resp) => {
+                    self.lists = resp.lists;
+                    self.list_error = None;
+                    *self.lists_loading.lock().unwrap() = false;
+                    return;
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    
+                    // Check if this is a retryable error
+                    let should_retry = match &last_error.as_ref().unwrap() {
+                        pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                            reqwest_err.is_timeout() || 
+                            reqwest_err.is_connect() || 
+                            reqwest_err.is_request() ||
+                            reqwest_err.to_string().contains("request or response body error")
+                        }
+                        pixeldrain_api::PixelDrainError::Api(api_err) => {
+                            api_err.status.is_server_error()
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_retry && attempt < MAX_RETRIES {
+                        std::thread::sleep(RETRY_DELAY);
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If we get here, all retries failed
+        self.list_error = Some(format!("Failed to fetch lists after {} attempts: {}", 
+            MAX_RETRIES, last_error.unwrap()));
+        *self.lists_loading.lock().unwrap() = false;
+    }
+    fn create_list(&mut self) {
+        // Set loading state
+        *self.list_create_loading.lock().unwrap() = true;
+        
+        // Add retry logic similar to other operations
+        const MAX_RETRIES: usize = 3;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+        
+        let client = self.make_api_client();
+        let req = pixeldrain_api::CreateListRequest {
+            title: self.new_list_title.clone(),
+            files: self.new_list_files.clone(),
+        };
+        let mut last_error = None;
+        
+        for attempt in 1..=MAX_RETRIES {
+            match client.create_list(&req) {
+                Ok(list) => {
+                    self.lists.push(list);
+                    self.new_list_title.clear();
+                    self.new_list_files.clear();
+                    self.list_error = None;
+                    *self.list_create_loading.lock().unwrap() = false;
+                    return;
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    
+                    // Check if this is a retryable error
+                    let should_retry = match &last_error.as_ref().unwrap() {
+                        pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                            reqwest_err.is_timeout() || 
+                            reqwest_err.is_connect() || 
+                            reqwest_err.is_request() ||
+                            reqwest_err.to_string().contains("request or response body error")
+                        }
+                        pixeldrain_api::PixelDrainError::Api(api_err) => {
+                            api_err.status.is_server_error()
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_retry && attempt < MAX_RETRIES {
+                        std::thread::sleep(RETRY_DELAY);
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If we get here, all retries failed
+        self.list_error = Some(format!("Failed to create list after {} attempts: {}", 
+            MAX_RETRIES, last_error.unwrap()));
+        *self.list_create_loading.lock().unwrap() = false;
+    }
+    fn delete_list(&mut self, list_id: &str) {
+        // Set loading state
+        *self.list_delete_loading.lock().unwrap() = true;
+        
+        // Add retry logic similar to other operations
+        const MAX_RETRIES: usize = 3;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+        
+        let client = self.make_api_client();
+        let mut last_error = None;
+        
+        for attempt in 1..=MAX_RETRIES {
+            match client.delete_list(list_id) {
+                Ok(_) => {
+                    self.lists.retain(|l| l.id != list_id);
+                    self.selected_list_id = None;
+                    self.list_error = None;
+                    *self.list_delete_loading.lock().unwrap() = false;
+                    return;
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    
+                    // Check if this is a retryable error
+                    let should_retry = match &last_error.as_ref().unwrap() {
+                        pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                            reqwest_err.is_timeout() || 
+                            reqwest_err.is_connect() || 
+                            reqwest_err.is_request() ||
+                            reqwest_err.to_string().contains("request or response body error")
+                        }
+                        pixeldrain_api::PixelDrainError::Api(api_err) => {
+                            api_err.status.is_server_error()
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_retry && attempt < MAX_RETRIES {
+                        std::thread::sleep(RETRY_DELAY);
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If we get here, all retries failed
+        self.list_error = Some(format!("Failed to delete list after {} attempts: {}", 
+            MAX_RETRIES, last_error.unwrap()));
+        *self.list_delete_loading.lock().unwrap() = false;
+    }
+    fn update_list(&mut self, list_id: &str) {
+        // Set loading state
+        *self.list_update_loading.lock().unwrap() = true;
+        
+        // Add retry logic similar to other operations
+        const MAX_RETRIES: usize = 3;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+        
+        let client = self.make_api_client();
+        let req = pixeldrain_api::CreateListRequest {
+            title: self.edit_list_title.clone(),
+            files: self.edit_list_files.clone(),
+        };
+        let mut last_error = None;
+        
+        for attempt in 1..=MAX_RETRIES {
+            match client.update_list(list_id, &req) {
+                Ok(updated) => {
+                    if let Some(list) = self.lists.iter_mut().find(|l| l.id == list_id) {
+                        *list = updated;
+                    }
+                    self.list_error = None;
+                    *self.list_update_loading.lock().unwrap() = false;
+                    return;
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    
+                    // Check if this is a retryable error
+                    let should_retry = match &last_error.as_ref().unwrap() {
+                        pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                            reqwest_err.is_timeout() || 
+                            reqwest_err.is_connect() || 
+                            reqwest_err.is_request() ||
+                            reqwest_err.to_string().contains("request or response body error")
+                        }
+                        pixeldrain_api::PixelDrainError::Api(api_err) => {
+                            api_err.status.is_server_error()
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_retry && attempt < MAX_RETRIES {
+                        std::thread::sleep(RETRY_DELAY);
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If we get here, all retries failed
+        self.list_error = Some(format!("Failed to update list after {} attempts: {}", 
+            MAX_RETRIES, last_error.unwrap()));
+        *self.list_update_loading.lock().unwrap() = false;
+    }
+    fn make_api_client(&self) -> pixeldrain_api::PixelDrainClient {
+        let config = if let Some(key) = self.get_api_key() {
+            pixeldrain_api::PixelDrainConfig::default().with_api_key(key)
+        } else {
+            pixeldrain_api::PixelDrainConfig::default()
+        };
+        
+        // Enable debug mode for troubleshooting (set to false for production)
+        let config = pixeldrain_api::PixelDrainConfig { debug: false, ..config };
+        
+        pixeldrain_api::PixelDrainClient::new(config).unwrap()
     }
 
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
@@ -568,7 +1153,9 @@ impl PixelDrainApp {
                     }
                 });
                 if self.settings_api_key.is_empty() {
-                    ui.colored_label(egui::Color32::YELLOW, "💡 Environment API key will be used automatically");
+                    ui.colored_label(egui::Color32::YELLOW, "💡 Environment API key will be used as fallback");
+                } else {
+                    ui.colored_label(egui::Color32::GREEN, "✅ Settings API key will be used (overrides environment)");
                 }
             }
         }
@@ -587,20 +1174,41 @@ impl PixelDrainApp {
 
         ui.separator();
 
+        // User info section with refresh button
+        let user_info_loading = *self.user_info_loading.lock().unwrap();
+        ui.horizontal(|ui| {
+            ui.label("Account Information");
+            if user_info_loading {
+                self.render_loading_spinner(ui, "Loading user info...");
+            } else {
+                if ui.button("🔄 Refresh").clicked() {
+                    self.fetch_user_info();
+                }
+            }
+        });
+
         // User info if available
         if let Some(user_info) = &user_info {
-            ui.label("Account Information");
+            let storage_space_str = if user_info.subscription.storage_space < 0 {
+                "Unlimited".to_string()
+            } else {
+                self.format_file_size_bytes(user_info.subscription.storage_space as u64)
+            };
             ui.label(format!("👤 Username: {}", user_info.username));
             ui.label(format!("📧 Email: {}", user_info.email));
+            ui.label(format!("📁 Files: {}", user_info.file_count));
             ui.label(format!("💾 Storage: {} / {}", 
                 self.format_file_size_bytes(user_info.storage_space_used),
-                self.format_file_size_bytes(user_info.subscription.storage_space)
+                storage_space_str
             ));
             ui.label(format!("📊 Monthly Transfer: {} / {}", 
                 self.format_file_size_bytes(user_info.monthly_transfer_used),
                 self.format_file_size_bytes(user_info.monthly_transfer_cap)
             ));
+            ui.label(format!("⏰ Files Expiry Days: {}", user_info.subscription.file_expiry_days));
             ui.label(format!("💳 Balance: {} micro EUR", user_info.balance_micro_eur));
+        } else {
+            ui.colored_label(egui::Color32::GRAY, "No account information available. Set API key in settings or PIXELDRAIN_API_KEY environment variable, then click Refresh.");
         }
 
         ui.separator();
@@ -608,6 +1216,8 @@ impl PixelDrainApp {
         if ui.button("💾 Save Settings").clicked() {
             self.save_settings(self.settings_api_key.clone(), self.settings_download_location.clone());
             settings_saved = true;
+            // Try to fetch user info after saving settings
+            self.fetch_user_info();
         }
         
         // Show success message only after actually saving
@@ -656,21 +1266,15 @@ impl PixelDrainApp {
     }
 
     fn start_upload(&mut self, path: PathBuf, ctx: egui::Context) {
-        // Get API key from settings or environment
-        let api_key = {
-            let state = self.state.lock().unwrap();
-            if !state.api_key.is_empty() {
-                Some(state.api_key.clone())
-            } else {
-                env::var("PIXELDRAIN_API_KEY").ok()
-            }
-        };
+        // Get API key with settings priority
+        let api_key = self.get_api_key();
         
         let progress = self.upload_progress.clone();
         let state = self.state.clone();
         let thread_running = self.upload_thread_running.clone();
         let ctx = ctx.clone();
         let last_update = Arc::new(AtomicU64::new(0));
+        let custom_filename = self.upload_custom_filename.clone();
         // Reset progress at start
         *self.upload_progress.lock().unwrap() = 0.0;
         *thread_running.lock().unwrap() = true;
@@ -708,7 +1312,11 @@ impl PixelDrainApp {
                     }
                 }))
             };
-            let result = client.upload_file(&path, Some(progress_cb));
+            let result = if !custom_filename.is_empty() {
+                client.upload_file_put(&path, &custom_filename, Some(progress_cb))
+            } else {
+                client.upload_file(&path, Some(progress_cb))
+            };
             let mut state = state.lock().unwrap();
             match result {
                 Ok(response) => {
@@ -716,7 +1324,11 @@ impl PixelDrainApp {
                     let entry = UploadHistoryEntry {
                         id: response.id,
                         url: url.clone(),
-                        filename: path.file_name().unwrap().to_string_lossy().to_string(),
+                        filename: if !custom_filename.is_empty() {
+                            custom_filename.clone()
+                        } else {
+                            path.file_name().unwrap().to_string_lossy().to_string()
+                        },
                         size: path.metadata().map(|m| m.len()).unwrap_or(0),
                         timestamp: Utc::now(),
                     };
@@ -737,12 +1349,117 @@ impl PixelDrainApp {
         });
     }
 
+    fn start_multiple_upload(&mut self, paths: Vec<PathBuf>, ctx: egui::Context) {
+        // Get API key with settings priority
+        let api_key = self.get_api_key();
+        
+        let progress = self.upload_progress.clone();
+        let state = self.state.clone();
+        let thread_running = self.upload_thread_running.clone();
+        let ctx = ctx.clone();
+        let last_update = Arc::new(AtomicU64::new(0));
+        
+        // Reset progress at start
+        *self.upload_progress.lock().unwrap() = 0.0;
+        *thread_running.lock().unwrap() = true;
+        
+        // Add debug log for upload start
+        self.add_debug_log(format!("Starting multiple upload: {} files", paths.len()));
+        
+        thread::spawn(move || {
+            let config = if let Some(key) = api_key {
+                PixelDrainConfig::default().with_api_key(key)
+            } else {
+                PixelDrainConfig::default()
+            };
+            
+            let client = match PixelDrainClient::new(config) {
+                Ok(client) => client,
+                Err(e) => {
+                    let mut state = state.lock().unwrap();
+                    state.last_error = Some(format!("Failed to create client: {}", e));
+                    state.debug_messages.push(format!("[{}] Multiple upload failed - client creation: {}", 
+                        chrono::Utc::now().format("%H:%M:%S"), e));
+                    *thread_running.lock().unwrap() = false;
+                    return;
+                }
+            };
+            
+            let total_files = paths.len();
+            let mut uploaded_count = 0;
+            
+            for (index, path) in paths.iter().enumerate() {
+                let progress_cb = {
+                    let progress = progress.clone();
+                    let ctx = ctx.clone();
+                    let last_update = last_update.clone();
+                    let file_index = index;
+                    let total = total_files;
+                    Arc::new(Mutex::new(move |p: f32| {
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                        let last = last_update.load(Ordering::Relaxed);
+                        if now - last >= 16 || p >= 1.0 {
+                            last_update.store(now, Ordering::Relaxed);
+                            let mut progress = progress.lock().unwrap();
+                            // Calculate overall progress across all files
+                            let file_progress = (file_index as f32 + p) / total as f32;
+                            *progress = file_progress;
+                            ctx.request_repaint();
+                        }
+                    }))
+                };
+                
+                let result = client.upload_file(path, Some(progress_cb));
+                let mut state = state.lock().unwrap();
+                
+                match result {
+                    Ok(response) => {
+                        let url = response.get_file_url();
+                        let entry = UploadHistoryEntry {
+                            id: response.id,
+                            url: url.clone(),
+                            filename: path.file_name().unwrap().to_string_lossy().to_string(),
+                            size: path.metadata().map(|m| m.len()).unwrap_or(0),
+                            timestamp: Utc::now(),
+                        };
+                        state.upload_history.push(entry);
+                        uploaded_count += 1;
+                        
+                        state.debug_messages.push(format!("[{}] File {}/{} uploaded successfully: {}", 
+                            chrono::Utc::now().format("%H:%M:%S"), uploaded_count, total_files, path.file_name().unwrap().to_string_lossy()));
+                    }
+                    Err(e) => {
+                        state.last_error = Some(format!("Upload error for {}: {}", path.file_name().unwrap().to_string_lossy(), e));
+                        state.debug_messages.push(format!("[{}] File upload failed: {} - {}", 
+                            chrono::Utc::now().format("%H:%M:%S"), path.file_name().unwrap().to_string_lossy(), e));
+                        break;
+                    }
+                }
+            }
+            
+            // Copy the last uploaded file URL to clipboard
+            if uploaded_count > 0 {
+                let state = state.lock().unwrap();
+                if let Some(last_entry) = state.upload_history.last() {
+                    let _ = Clipboard::new().and_then(|mut c| c.set_text(last_entry.url.clone()));
+                }
+            }
+            
+            *thread_running.lock().unwrap() = false;
+        });
+    }
+
     fn start_download(&mut self) {
         let url = self.download_url.clone();
-        let save_dir = self.download_save_path.clone();
         let progress = self.download_progress.clone();
         let state = self.state.clone();
         let thread_running = self.download_thread_running.clone();
+        
+        // Get download location from settings
+        let download_location = {
+            let state = self.state.lock().unwrap();
+            state.download_location.clone()
+        };
         
         // Reset progress at start
         *self.download_progress.lock().unwrap() = 0.0;
@@ -781,10 +1498,11 @@ impl PixelDrainApp {
                 }
             };
             
-            let save_path = save_dir
-                .as_ref()
-                .map(|d| d.join(&file_info.name))
-                .unwrap_or_else(|| PathBuf::from(&file_info.name));
+            let save_path = if !download_location.is_empty() {
+                PathBuf::from(&download_location).join(&file_info.name)
+            } else {
+                PathBuf::from(&file_info.name)
+            };
             
             let progress_cb = Arc::new(Mutex::new(move |p: f32| {
                 let mut progress = progress.lock().unwrap();
@@ -813,17 +1531,14 @@ impl PixelDrainApp {
     }
 
     fn refresh_file_list(&self) {
-        // Get API key from settings or environment
-        let api_key = {
-            let state = self.state.lock().unwrap();
-            if !state.api_key.is_empty() {
-                Some(state.api_key.clone())
-            } else {
-                env::var("PIXELDRAIN_API_KEY").ok()
-            }
-        };
+        // Set loading state
+        *self.files_loading.lock().unwrap() = true;
+        
+        // Get API key with settings priority
+        let api_key = self.get_api_key();
         
         let state = self.state.clone();
+        let files_loading = self.files_loading.clone();
         
         // Clear any previous errors when starting
         state.lock().unwrap().last_error = None;
@@ -840,36 +1555,71 @@ impl PixelDrainApp {
                 Err(e) => {
                     let mut state = state.lock().unwrap();
                     state.last_error = Some(format!("Failed to create client: {}", e));
+                    *files_loading.lock().unwrap() = false;
                     return;
                 }
             };
             
-            match client.get_user_files() {
-                Ok(response) => {
-                    let mut state = state.lock().unwrap();
-                    state.file_list = response.files;
-                    state.last_error = None;
-                }
-                Err(e) => {
-                    let mut state = state.lock().unwrap();
-                    state.last_error = Some(format!("Failed to list files: {}", e));
+            // Add retry logic similar to Lists tab functions
+            const MAX_RETRIES: usize = 3;
+            const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+            
+            let mut last_error = None;
+            
+            for attempt in 1..=MAX_RETRIES {
+                match client.get_user_files() {
+                    Ok(response) => {
+                        let mut state = state.lock().unwrap();
+                        state.file_list = response.files;
+                        state.last_error = None;
+                        *files_loading.lock().unwrap() = false;
+                        return;
+                    }
+                    Err(e) => {
+                        last_error = Some(e);
+                        
+                        // Check if this is a retryable error
+                        let should_retry = match &last_error.as_ref().unwrap() {
+                            pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                                reqwest_err.is_timeout() || 
+                                reqwest_err.is_connect() || 
+                                reqwest_err.is_request() ||
+                                reqwest_err.to_string().contains("request or response body error")
+                            }
+                            pixeldrain_api::PixelDrainError::Api(api_err) => {
+                                api_err.status.is_server_error()
+                            }
+                            _ => false,
+                        };
+                        
+                        if should_retry && attempt < MAX_RETRIES {
+                            std::thread::sleep(RETRY_DELAY);
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
                 }
             }
+            
+            // If we get here, all retries failed
+            let mut state = state.lock().unwrap();
+            state.last_error = Some(format!("Failed to list files after {} attempts: {}", 
+                MAX_RETRIES, last_error.unwrap()));
+            *files_loading.lock().unwrap() = false;
         });
     }
 
     fn delete_file(&self, file_id: &str) {
-        let api_key = {
-            let state = self.state.lock().unwrap();
-            if !state.api_key.is_empty() {
-                Some(state.api_key.clone())
-            } else {
-                env::var("PIXELDRAIN_API_KEY").ok()
-            }
-        };
+        // Set loading state
+        *self.file_delete_loading.lock().unwrap() = true;
+        
+        // Get API key with settings priority
+        let api_key = self.get_api_key();
 
         let state = self.state.clone();
         let file_id = file_id.to_string();
+        let file_delete_loading = self.file_delete_loading.clone();
 
         // Clear any previous errors when starting
         state.lock().unwrap().last_error = None;
@@ -888,51 +1638,90 @@ impl PixelDrainApp {
                 Err(e) => {
                     let mut state = state.lock().unwrap();
                     state.last_error = Some(format!("Failed to create client: {}", e));
+                    *file_delete_loading.lock().unwrap() = false;
                     return;
                 }
             };
 
-            match client.delete_file(&file_id) {
-                Ok(_) => {
-                    let duration = start_time.elapsed();
-                    {
-                        let mut state = state.lock().unwrap();
-                        state.last_error = None;
-                        state.debug_messages.push(format!("[{}] Successfully deleted file {} in {:?}", 
-                            chrono::Utc::now().format("%H:%M:%S"), file_id, duration));
-                        state.last_operation_time = Some(chrono::Utc::now());
-                    } // Release lock here
-                    
-                    // Refresh the file list after successful deletion
-                    let state_clone = state.clone();
-                    let api_key_clone = api_key.clone();
-                    thread::spawn(move || {
-                        thread::sleep(std::time::Duration::from_millis(500)); // Small delay
+            // Add retry logic similar to Lists tab functions
+            const MAX_RETRIES: usize = 3;
+            const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+            
+            let mut last_error = None;
+            
+            for attempt in 1..=MAX_RETRIES {
+                match client.delete_file(&file_id) {
+                    Ok(_) => {
+                        let duration = start_time.elapsed();
+                        {
+                            let mut state = state.lock().unwrap();
+                            state.last_error = None;
+                            state.debug_messages.push(format!("[{}] Successfully deleted file {} in {:?} (attempt {})", 
+                                chrono::Utc::now().format("%H:%M:%S"), file_id, duration, attempt));
+                            state.last_operation_time = Some(chrono::Utc::now());
+                        } // Release lock here
                         
-                        let config = if let Some(key) = api_key_clone {
-                            PixelDrainConfig::default().with_api_key(key)
-                        } else {
-                            PixelDrainConfig::default()
+                        *file_delete_loading.lock().unwrap() = false;
+                        
+                        // Refresh the file list after successful deletion
+                        let state_clone = state.clone();
+                        let api_key_clone = api_key.clone();
+                        thread::spawn(move || {
+                            thread::sleep(std::time::Duration::from_millis(500)); // Small delay
+                            
+                            let config = if let Some(key) = api_key_clone {
+                                PixelDrainConfig::default().with_api_key(key)
+                            } else {
+                                PixelDrainConfig::default()
+                            };
+                            
+                            if let Ok(client) = PixelDrainClient::new(config) {
+                                if let Ok(response) = client.get_user_files() {
+                                    let mut state = state_clone.lock().unwrap();
+                                    state.file_list = response.files;
+                                    state.debug_messages.push(format!("[{}] File list refreshed after deletion", 
+                                        chrono::Utc::now().format("%H:%M:%S")));
+                                }
+                            }
+                        });
+                        return;
+                    }
+                    Err(e) => {
+                        last_error = Some(e);
+                        
+                        // Check if this is a retryable error
+                        let should_retry = match &last_error.as_ref().unwrap() {
+                            pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                                reqwest_err.is_timeout() || 
+                                reqwest_err.is_connect() || 
+                                reqwest_err.is_request() ||
+                                reqwest_err.to_string().contains("request or response body error")
+                            }
+                            pixeldrain_api::PixelDrainError::Api(api_err) => {
+                                api_err.status.is_server_error()
+                            }
+                            _ => false,
                         };
                         
-                        if let Ok(client) = PixelDrainClient::new(config) {
-                            if let Ok(response) = client.get_user_files() {
-                                let mut state = state_clone.lock().unwrap();
-                                state.file_list = response.files;
-                                state.debug_messages.push(format!("[{}] File list refreshed after deletion", 
-                                    chrono::Utc::now().format("%H:%M:%S")));
-                            }
+                        if should_retry && attempt < MAX_RETRIES {
+                            std::thread::sleep(RETRY_DELAY);
+                            continue;
+                        } else {
+                            break;
                         }
-                    });
-                }
-                Err(e) => {
-                    let duration = start_time.elapsed();
-                    let mut state = state.lock().unwrap();
-                    state.last_error = Some(format!("Failed to delete file: {} (took {:?})", e, duration));
-                    state.debug_messages.push(format!("[{}] Delete failed for file {}: {} (took {:?})", 
-                        chrono::Utc::now().format("%H:%M:%S"), file_id, e, duration));
+                    }
                 }
             }
+            
+            // If we get here, all retries failed
+            let duration = start_time.elapsed();
+            let error_msg = last_error.unwrap();
+            let mut state = state.lock().unwrap();
+            state.last_error = Some(format!("Failed to delete file after {} attempts: {} (took {:?})", 
+                MAX_RETRIES, error_msg, duration));
+            state.debug_messages.push(format!("[{}] Delete failed for file {} after {} attempts: {} (took {:?})", 
+                chrono::Utc::now().format("%H:%M:%S"), file_id, MAX_RETRIES, error_msg, duration));
+            *file_delete_loading.lock().unwrap() = false;
         });
     }
 
@@ -968,6 +1757,37 @@ impl PixelDrainApp {
         Ok(())
     }
     
+    fn get_default_download_location() -> String {
+        use std::env;
+        
+        #[cfg(target_os = "windows")]
+        {
+            // Windows: %USERPROFILE%\Downloads
+            if let Ok(userprofile) = env::var("USERPROFILE") {
+                return format!("{}\\Downloads", userprofile);
+            }
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: /Users/$USER/Downloads
+            if let Ok(home) = env::var("HOME") {
+                return format!("{}/Downloads", home);
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // Linux: $HOME/Downloads
+            if let Ok(home) = env::var("HOME") {
+                return format!("{}/Downloads", home);
+            }
+        }
+        
+        // Fallback: current directory
+        ".".to_string()
+    }
+
     fn load_settings(&mut self) {
         use std::fs;
         use serde_json;
@@ -980,9 +1800,22 @@ impl PixelDrainApp {
             if let Ok(loaded_state) = serde_json::from_str::<AppState>(&data) {
                 let mut state = self.state.lock().unwrap();
                 state.api_key = loaded_state.api_key;
-                state.download_location = loaded_state.download_location;
+                // Use loaded download location if it's not empty, otherwise use default
+                if !loaded_state.download_location.is_empty() {
+                    state.download_location = loaded_state.download_location;
+                } else {
+                    state.download_location = Self::get_default_download_location();
+                }
                 // Don't overwrite history and other runtime data
+            } else {
+                // If settings file is corrupted, set default download location
+                let mut state = self.state.lock().unwrap();
+                state.download_location = Self::get_default_download_location();
             }
+        } else {
+            // If no settings file exists, set default download location
+            let mut state = self.state.lock().unwrap();
+            state.download_location = Self::get_default_download_location();
         }
     }
 
@@ -1009,6 +1842,75 @@ impl PixelDrainApp {
             format!("{:.2} KB", bytes_f / KB)
         } else {
             format!("{} B", bytes)
+        }
+    }
+
+    fn fetch_user_info(&mut self) {
+        // Set loading state
+        *self.user_info_loading.lock().unwrap() = true;
+        
+        // Get API key with settings priority
+        let api_key = self.get_api_key();
+
+        if let Some(_key) = api_key {
+            let client = self.make_api_client();
+            let state = self.state.clone();
+            let user_info_loading = self.user_info_loading.clone();
+
+            thread::spawn(move || {
+                let start_time = Instant::now();
+                let mut last_error = None;
+
+                for attempt in 1..=3 { // Retry up to 3 times
+                    match client.get_user() {
+                        Ok(user_info) => {
+                            let duration = start_time.elapsed();
+                            {
+                                let mut state = state.lock().unwrap();
+                                state.user_info = Some(user_info);
+                                state.last_error = None;
+                                state.debug_messages.push(format!("[{}] Successfully fetched user info in {:?} (attempt {})", 
+                                    chrono::Utc::now().format("%H:%M:%S"), duration, attempt));
+                                state.last_operation_time = Some(chrono::Utc::now());
+                            }
+                            *user_info_loading.lock().unwrap() = false;
+                            break;
+                        }
+                        Err(e) => {
+                            last_error = Some(e);
+                            let should_retry = match &last_error.as_ref().unwrap() {
+                                pixeldrain_api::PixelDrainError::Reqwest(reqwest_err) => {
+                                    reqwest_err.is_timeout() || 
+                                    reqwest_err.is_connect() || 
+                                    reqwest_err.is_request() ||
+                                    reqwest_err.to_string().contains("request or response body error")
+                                }
+                                pixeldrain_api::PixelDrainError::Api(api_err) => {
+                                    api_err.status.is_server_error()
+                                }
+                                _ => false,
+                            };
+                            if should_retry && attempt < 3 {
+                                std::thread::sleep(std::time::Duration::from_secs(3)); // Retry after 3 seconds
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(error_msg) = last_error {
+                    let duration = start_time.elapsed();
+                    let mut state = state.lock().unwrap();
+                    state.last_error = Some(format!("Failed to fetch user info after {} attempts: {} (took {:?})", 
+                        3, error_msg, duration));
+                    state.debug_messages.push(format!("[{}] User info fetch failed after {} attempts: {} (took {:?})", 
+                        chrono::Utc::now().format("%H:%M:%S"), 3, error_msg, duration));
+                }
+                *user_info_loading.lock().unwrap() = false;
+            });
+        } else {
+            self.state.lock().unwrap().last_error = Some("No API key available (check settings or environment variable PIXELDRAIN_API_KEY). Cannot fetch user info.".to_string());
         }
     }
 }

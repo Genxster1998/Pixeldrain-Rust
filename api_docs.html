@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		
+<title>API documentation ~ pixeldrain</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="theme-color" content="#220735" />
+
+<link id="stylesheet_layout" rel="stylesheet" type="text/css" href="/res/style/layout.css?v486709"/>
+<link id="stylesheet_theme" rel="stylesheet" type="text/css" href="/theme.css"/>
+
+<link rel="icon" sizes="32x32" href="/res/img/pixeldrain_32.png" />
+<link rel="icon" sizes="128x128" href="/res/img/pixeldrain_128.png" />
+<link rel="icon" sizes="152x152" href="/res/img/pixeldrain_152.png" />
+<link rel="icon" sizes="180x180" href="/res/img/pixeldrain_180.png" />
+<link rel="icon" sizes="192x192" href="/res/img/pixeldrain_192.png" />
+<link rel="icon" sizes="196x196" href="/res/img/pixeldrain_196.png" />
+<link rel="icon" sizes="256x256" href="/res/img/pixeldrain_256.png" />
+<link rel="apple-touch-icon" sizes="152x152" href="/res/img/pixeldrain_152.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="/res/img/pixeldrain_180.png" />
+<link rel="shortcut icon" sizes="196x196" href="/res/img/pixeldrain_196.png" />
+
+<meta name="description" content="Pixeldrain is a file transfer service, you
+can upload any file and you will be given a shareable link right away.
+pixeldrain also supports previews for images, videos, audio, PDFs and much more." />
+<meta name="keywords" content="file sharing, free file sharing, file transfer,
+free file transfer, file hosting, free file hosting, hosting, file upload,
+free file upload, uploading, send file, large file, free file sharing,
+free file transfer, 20 GB free, free file sending, file storage, cloud storage,
+free cloud storage, image hosting, image sharing, photo hosting,
+photo transfer, photo sharing, video hosting, video sharing, video transfer,
+document sharing, upload documents, send documents, huge file, large video,
+large document, pdf, pdf sharing, pdf upload, pdf transfer, pdf reader,
+free pdf upload, text file upload, text sharing, photo storage,
+professional file transfer, cheap storage, cheap file storage, send large file,
+send big file, send huge file, audio sharing, music sharing, audio upload,
+music upload" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="API documentation ~ pixeldrain" />
+<meta property="og:site_name" content="pixeldrain" />
+<meta property="og:description" content="Instant file and screenshot sharing." />
+<meta property="og:url" content="http://pixeldrain.com/" />
+<meta property="og:image" content="/res/img/pixeldrain_256.png" />
+<meta property="og:image:type" content="image/png" />
+
+	</head>
+
+	<body>
+		
+
+<button id="button_toggle_navigation" class="button_toggle_navigation icon" onclick="toggleMenu();">
+	menu
+</button>
+<nav id="page_navigation" class="page_navigation">
+	<a href="/home#">Home</a>
+	
+		<a href="/home#pro">Get Premium</a>
+	
+	<hr />
+	
+		<a href="/login">Login</a>
+		<a href="/register">Register</a>
+	
+	<hr />
+	<a href="/about">Questions & Answers</a>
+	<a href="/apps">Apps</a>
+	<a href="/appearance">Theme</a>
+	<a href="/speedtest">Speedtest</a>
+	<a href="/api">API</a>
+	<a href="/filesystem">Filesystem Guide</a>
+	<a href="/acknowledgements">Acknowledgements</a>
+	<a href="/abuse">DMCA and abuse</a>
+	<a href="https://stats.uptimerobot.com/p9v2ktzyjm" target="_blank">Server Status</a>
+</nav>
+<script>
+function toggleMenu() {
+	var nav  = document.getElementById("page_navigation");
+	var body = document.getElementById("page_body");
+	if (nav.offsetLeft === 0) {
+		
+		nav.style.left = -nav.offsetWidth + "px";
+		body.style.marginLeft = "0";
+	} else {
+		
+		nav.style.left = "0";
+		body.style.marginLeft = nav.offsetWidth + "px";
+	}
+}
+function resetMenu() {
+	document.getElementById("page_navigation").style.left = "";
+	document.getElementById("page_body").style.marginLeft = "";
+}
+</script>
+
+<div id="page_body" class="page_body">
+
+			<header>
+				<h1>API documentation</h1>
+			</header>
+			<div id="page_content" class="page_content">
+				<section>
+					<p>Methods for using pixeldrain programmatically.</p>
+
+<h2 id="authentication">Authentication</h2>
+
+<p>All methods which create, modify or delete a resource require an API key. API
+keys can be obtained from your user account&rsquo;s <a href="/user/api_keys">API keys page</a>.</p>
+
+<p>To use the API key you need to enter it in the password field of <a href="https://en.wikipedia.org/wiki/Basic_access_authentication">HTTP Basic
+Access
+Authentication</a>. The
+username field does not matter, it can be empty or anything else.</p>
+
+<p>Example usage in JavaScript:</p>
+
+<pre><code class="language-js">const resp = await fetch(
+	&quot;https://pixeldrain.com/api/user/files&quot;,
+	headers: {
+		&quot;Authorization&quot;: &quot;Basic &quot;+btoa(&quot;:&quot;+api_key),
+		// The btoa function encodes the key to Base64
+	},
+)
+if(resp.status &gt;= 400) {
+	throw new Error(await resp.json())
+}
+result = await resp.json()
+</code></pre>
+
+<p>Some JSON responses include fields which end in &ldquo;_href&rdquo; (some people don&rsquo;t know
+this, but &ldquo;href&rdquo; stands for &ldquo;Hypertext Reference&rdquo;, the more you know). These
+point to different places in the API, which you can retrieve with a GET request.
+The path is to be appended to the API URL, so &ldquo;/file/someid/thumbnail&rdquo; becomes
+&ldquo;/api/file/someid/thumbnail&rdquo;.</p>
+
+<p>The base URL for the API is &ldquo;/api&rdquo;, all paths below are relative to that
+URL.</p>
+
+<h2 id="curl-example">curl example</h2>
+
+<p>To upload files to pixeldrain you will need an API key. Get an API key from the
+<a href="/user/api_keys">API keys page</a> and enter it in the command. Replace the example
+API key here with your own:</p>
+
+<p><code>curl -T &quot;file_name.txt&quot; -u :5f45f184-64bb-4eaa-be19-4a5f0459db49
+https://pixeldrain.com/api/file/</code></p>
+
+<h2 id="form-value-order">Form value order</h2>
+
+<p>I recommend you put files at the end of every file upload form. By doing this
+the pixeldrain server can respond to malformed requests before the file upload
+finishes and this may save you a lot of time and bandwidth when uploading large
+files. Make sure your HTTP client has support for premature responses,
+pixeldrain uses them a lot. If the server responds before your request is
+finished it will always indicate an error and you may abort the connection.</p>
+
+<h2 id="file-methods">File Methods</h2>
+
+<p><details class="api_doc_details request_post">
+<summary><span class="method">POST</span>/file</summary>
+<div></p>
+
+<h3 id="description">Description</h3>
+
+<p>Upload a file. I recommend that you use the PUT API instead of the POST API.
+It&rsquo;s easier to use and the multipart encoding of the POST API can cause
+performance issues in certain environments.</p>
+
+<h3 id="parameters">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Required</th>
+<th>Maximum Size</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>name</td>
+<td>string</td>
+<td>false</td>
+<td>255 characters</td>
+<td>multipart file name</td>
+<td>Name of the file to upload</td>
+</tr>
+
+<tr>
+<td>file</td>
+<td>multipart file</td>
+<td>true</td>
+<td>Depends on user subscription</td>
+<td>none</td>
+<td>File to upload</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns">Returns</h3>
+
+<p>HTTP 200: OK</p>
+
+<pre><code>{
+	&quot;success&quot;: true,
+	&quot;id&quot;: &quot;abc123&quot; // ID of the newly uploaded file
+}
+</code></pre>
+
+<p>HTTP 422: Unprocessable Entity</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;no_file&quot;,
+	&quot;message&quot;: &quot;The file does not exist or is empty.&quot;
+}
+</code></pre>
+
+<p>HTTP 500: Internal Server Error</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;internal&quot;,
+	&quot;message&quot;: &quot;An internal server error occurred.&quot;
+}
+</code></pre>
+
+<p>HTTP 413: Payload Too Large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;file_too_large&quot;,
+	&quot;message&quot;: &quot;The file you tried to upload is too large&quot;
+}
+</code></pre>
+
+<p>HTTP 500: Internal Server Error</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;writing&quot;,
+	&quot;message&quot;: &quot;Something went wrong while writing the file to disk, the server may be out of storage space.&quot;
+}
+</code></pre>
+
+<p>HTTP 413: Payload Too Large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;name_too_long&quot;,
+	&quot;message&quot;: &quot;File Name is too long, Max 255 characters allowed.&quot;
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<p><details class="api_doc_details request_put">
+<summary><span class="method">PUT</span>/file/{name}</summary>
+<div></p>
+
+<h3 id="description-1">Description</h3>
+
+<p>Upload a file.</p>
+
+<h3 id="parameters-1">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Required</th>
+<th>Location</th>
+<th>Maximum Size</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>name</td>
+<td>string</td>
+<td>true</td>
+<td>URL</td>
+<td>255 characters</td>
+<td>none</td>
+<td>Name of the file to upload</td>
+</tr>
+
+<tr>
+<td>file</td>
+<td>file</td>
+<td>true</td>
+<td>request body</td>
+<td>Depends on user subscription</td>
+<td>none</td>
+<td>File to upload</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns-1">Returns</h3>
+
+<p>HTTP 201: OK</p>
+
+<pre><code>{
+	&quot;id&quot;: &quot;abc123&quot; // ID of the newly uploaded file
+}
+</code></pre>
+
+<p>HTTP 422: Unprocessable Entity</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;no_file&quot;,
+	&quot;message&quot;: &quot;The file does not exist or is empty.&quot;
+}
+</code></pre>
+
+<p>HTTP 500: Internal Server Error</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;internal&quot;,
+	&quot;message&quot;: &quot;An internal server error occurred.&quot;
+}
+</code></pre>
+
+<p>HTTP 413: Payload Too Large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;file_too_large&quot;,
+	&quot;message&quot;: &quot;The file you tried to upload is too large&quot;
+}
+</code></pre>
+
+<p>HTTP 500: Internal Server Error</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;writing&quot;,
+	&quot;message&quot;: &quot;Something went wrong while writing the file to disk, the server may be out of storage space.&quot;
+}
+</code></pre>
+
+<p>HTTP 413: Payload Too Large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;name_too_long&quot;,
+	&quot;message&quot;: &quot;File Name is too long, Max 255 characters allowed.&quot;
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<p><details class="api_doc_details request_get">
+<summary><span class="method">GET</span>/file/{id}</summary>
+<div></p>
+
+<h3 id="description-2">Description</h3>
+
+<p>Returns the full file associated with the ID. Supports byte range requests.</p>
+
+<p>When &lsquo;?download&rsquo; is added to the URL the server will send an attachment header
+instead of inline rendering, which causes the browser to show a &lsquo;Save File&rsquo;
+dialog.</p>
+
+<p>Warning: If a file is using too much bandwidth it can be rate limited. The rate
+limit will be enabled if a file has three times more downloads than views. The
+owner of a file can always download it. When a file is rate limited the user
+will need to fill out a captcha in order to continue downloading the file. The
+captcha will only appear on the file viewer page (pixeldrain.com/u/{id}). Rate
+limiting has been added to prevent the spread of viruses and to stop hotlinking.
+Hotlinking is only allowed when files are uploaded using a Pro account.</p>
+
+<p>Pixeldrain also includes a virus scanner. If a virus has been detected in a file
+the user will also have to fill in a captcha to download it.</p>
+
+<h3 id="parameters-2">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Required</th>
+<th>Location</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>id</td>
+<td>true</td>
+<td>URL</td>
+<td>ID of the file to request</td>
+</tr>
+
+<tr>
+<td>download</td>
+<td>false</td>
+<td>URL</td>
+<td>Sends attachment header instead of inline</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns-2">Returns</h3>
+
+<pre><code>HTTP 200: OK
+
+Requested file data
+</code></pre>
+
+<p>HTTP 404: Not Found</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;not_found&quot;,
+	&quot;message&quot;: &quot;The entity you requested could not be found&quot;
+}
+</code></pre>
+
+<p>HTTP 403: Forbidden</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;file_rate_limited_captcha_required&quot;,
+	&quot;message&quot;: &quot;This file is using too much bandwidth. For anonymous downloads a captcha is required now. The captcha entry is available on the download page&quot;
+}
+</code></pre>
+
+<p>HTTP 403: Forbidden</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;virus_detected_captcha_required&quot;,
+	&quot;message&quot;: &quot;This file has been marked as malware by our scanning systems. To avoid infecting other systems through automated downloads we require you to enter a captcha. The captcha entry is available on the download page&quot;
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<p><details class="api_doc_details request_get">
+<summary><span class="method">GET</span>/file/{id}/info</summary>
+<div></p>
+
+<h3 id="description-3">Description</h3>
+
+<p>Returns information about one or more files. You can also put a comma separated
+list of file IDs in the URL and it will return an array of file info, instead of
+a single object. There&rsquo;s a limit of 1000 files per request.</p>
+
+<h3 id="parameters-3">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Required</th>
+<th>Location</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>id</td>
+<td>true</td>
+<td>URL</td>
+<td>ID of the file</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns-3">Returns</h3>
+
+<p>HTTP 200: OK</p>
+
+<pre><code>{
+	&quot;id&quot;: &quot;1234abcd&quot;,
+	&quot;name&quot;: &quot;screenshot.png&quot;,
+	// Size of the file in bytes
+	&quot;size&quot;: 5694837,
+	// Number of unique file views, views are counted once per IP address
+	&quot;views&quot; 1234,
+	// Total bandwidth usage of the file
+	&quot;bandwidth_used&quot;: 1234567890,
+	// Premium bandwidth usage, from users with a Pro subscription or bandwidth sharing
+	&quot;bandwidth_used_paid&quot;: 1234567890,
+	// Unique downloads per IP address
+	&quot;downloads&quot;: 1234,
+	&quot;date_upload&quot;: 2020-02-04T18:34:05.706801Z,
+	&quot;date_last_view&quot;: 2020-02-04T18:34:05.706801Z,
+	&quot;mime_type&quot; &quot;image/png&quot;,
+	// Link to a thumbnail of this file
+	&quot;thumbnail_href&quot;: &quot;/file/1234abcd/thumbnail&quot;
+	// SHA256 sum of the file, encoded in hexadecimal
+	&quot;hash_sha256&quot;: &quot;e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855&quot;,
+	// If the current logged in user can edit the file
+	&quot;can_edit&quot;: true,
+}
+</code></pre>
+
+<p>HTTP 404: Not Found</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;file_not_found&quot;
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<p><details class="api_doc_details request_get">
+<summary><span class="method">GET</span>/file/{id}/thumbnail?width=x&amp;height=x</summary>
+<div></p>
+
+<h3 id="description-4">Description</h3>
+
+<p>Returns a PNG thumbnail image representing the file. The thumbnail image will be
+128x128 px by default. You can specify the width and height with parameters in
+the URL. The width and height parameters need to be a multiple of 16. So the
+allowed values are 16, 32, 48, 64, 80, 96, 112 and 128. If a thumbnail cannot be
+generated for the file you will be redirected to a mime type image of 128x128
+px.</p>
+
+<h3 id="parameters-4">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Required</th>
+<th>Location</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>id</td>
+<td>true</td>
+<td>URL</td>
+<td>ID of the file to get a thumbnail for</td>
+</tr>
+
+<tr>
+<td>width</td>
+<td>false</td>
+<td>URL</td>
+<td>Width of the thumbnail image</td>
+</tr>
+
+<tr>
+<td>height</td>
+<td>false</td>
+<td>URL</td>
+<td>Height of the thumbnail image</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns-4">Returns</h3>
+
+<p>A PNG image if a thumbnail can be generated. If a thumbnail cannot be generated
+you will get a 301 redirect to an image representing the type of the file.
+</div>
+</details></p>
+
+<p><details class="api_doc_details request_delete">
+<summary><span class="method">DELETE</span>/file/{id}</summary>
+<div></p>
+
+<h3 id="description-5">Description</h3>
+
+<p>Deletes a file. Only works when the users owns the file.</p>
+
+<h3 id="parameters-5">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Required</th>
+<th>Location</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>id</td>
+<td>true</td>
+<td>URL</td>
+<td>ID of the file to delete</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns-5">Returns</h3>
+
+<p>HTTP 200: OK</p>
+
+<pre><code>{
+	&quot;success&quot;: true,
+	&quot;value&quot;: &quot;file_deleted&quot;,
+	&quot;message&quot;: &quot;The file has been deleted.&quot;
+}
+</code></pre>
+
+<p>HTTP 404: Not Found</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;file_not_found&quot;,
+	&quot;message&quot;: &quot;File ID was not found in the database.&quot;
+}
+</code></pre>
+
+<p>HTTP 401: Unauthorized</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;unauthorized&quot;,
+	&quot;message&quot;: &quot;You are not logged in.&quot;
+}
+</code></pre>
+
+<p>HTTP 403: Forbidden</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;forbidden&quot;,
+	&quot;message&quot;: &quot;This is not your file.&quot;
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<h2 id="list-methods">List Methods</h2>
+
+<p><details class="api_doc_details request_post">
+<summary><span class="method">POST</span>/list</summary>
+<div></p>
+
+<h3 id="description-6">Description</h3>
+
+<p>Creates a list of files that can be viewed together on the file viewer page.</p>
+
+<h3 id="parameters-6">Parameters</h3>
+
+<p>POST body should be a JSON object, example below. A list can contain at most
+10000 files. If you try to add more the request will fail.</p>
+
+<h4 id="example">Example</h4>
+
+<pre><code>{
+	&quot;title&quot;: &quot;My beautiful photos&quot;, // Defaults to &quot;Pixeldrain List&quot;
+	&quot;anonymous&quot;: false / true, // If true this list will not be linked to your user account. Defaults to &quot;false&quot;
+	&quot;files&quot;: [ // Ordered array of files to add to the list
+		{
+			&quot;id&quot;: &quot;abc123&quot;,
+			&quot;description&quot;: &quot;First photo of the week, such a beautiful valley&quot;
+		},
+		{
+			&quot;id&quot;: &quot;123abc&quot;,
+			&quot;description&quot;: &quot;The week went by so quickly, here's a photo from the plane back&quot;
+		}
+	]
+}
+</code></pre>
+
+<h3 id="returns-6">Returns</h3>
+
+<p>HTTP 200: OK</p>
+
+<pre><code>{
+	&quot;success&quot;: true,
+	&quot;id&quot;: &quot;yay137&quot; // ID of the newly created list
+}
+</code></pre>
+
+<p>HTTP 422: Unprocessable Entity</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;list_file_not_found&quot;,
+	&quot;message&quot;: &quot;File Oh42No was not found in the database.&quot;,
+	&quot;extra&quot;: {
+		&quot;file_not_found&quot;: &quot;0h42No&quot; // The file you tried to add with this ID does not exist
+	}
+}
+</code></pre>
+
+<p>HTTP 413: Payload too large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;too_many_files&quot;,
+	&quot;message&quot;: &quot;This list contains too many files, max 10000 allowed.&quot;
+}
+</code></pre>
+
+<p>HTTP 422: Unprocessable Entity</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;json_parse_failed&quot;,
+	&quot;message&quot;: &quot;The JSON object in the request body could not be read.&quot;
+}
+</code></pre>
+
+<p>HTTP 413: Payload too large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;title_too_long&quot;,
+	&quot;message&quot;: &quot;The title of this list is too long, max 300 characters allowed.&quot;
+}
+</code></pre>
+
+<p>HTTP 413: Payload too large</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;description_too_long&quot;,
+	&quot;message&quot;: &quot;The description of one of the files in the list is too long, max 3000 characters allowed.&quot;
+}
+</code></pre>
+
+<p>HTTP 422: Unprocessable Entity</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;cannot_create_empty_list&quot;,
+	&quot;message&quot;: &quot;You cannot make a list with no files.&quot;
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<p><details class="api_doc_details request_get">
+<summary><span class="method">GET</span>/list/{id}</summary>
+<div></p>
+
+<h3 id="description-7">Description</h3>
+
+<p>Returns information about a file list and the files in it.</p>
+
+<h3 id="parameters-7">Parameters</h3>
+
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Required</th>
+<th>Location</th>
+<th>Description</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>id</td>
+<td>true</td>
+<td>URL</td>
+<td>ID of the list</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="returns-7">Returns</h3>
+
+<p>The API will return some basic information about every file. Every file also has
+a &ldquo;detail_href&rdquo; field which contains a URL to the info API of the file. Follow
+that link to get more information about the file like size, checksum, mime type,
+etc. The address is relative to the API URL and should be appended to the end.</p>
+
+<p>HTTP 200: OK</p>
+
+<pre><code>{
+	&quot;success&quot;: true,
+	&quot;id&quot;: &quot;L8bhwx&quot;,
+	&quot;title&quot;: &quot;Rust in Peace&quot;,
+	&quot;date_created&quot;: 2020-02-04T18:34:13.466276Z,
+	&quot;files&quot;: [
+		// These structures are the same as the file info response, except for the detail_href and description fields
+		{
+			&quot;detail_href&quot;: &quot;/file/_SqVWi/info&quot;,
+			&quot;description&quot;: &quot;&quot;,
+			&quot;success&quot;: true,
+			&quot;id&quot;: &quot;_SqVWi&quot;,
+			&quot;name&quot;: &quot;01 Holy Wars... The Punishment Due.mp3&quot;,
+			&quot;size&quot;: 123456,
+			&quot;date_created&quot;: 2020-02-04T18:34:13.466276Z,
+			&quot;date_last_view&quot;: 2020-02-04T18:34:13.466276Z,
+			&quot;mime_type&quot;: &quot;audio/mp3&quot;,
+			&quot;views&quot;: 1,
+			&quot;bandwidth_used&quot;: 1234567890,
+			&quot;thumbnail_href&quot;: &quot;/file/_SqVWi/thumbnail&quot;
+		},
+		{
+			&quot;detail_href&quot;: &quot;/file/RKwgZb/info&quot;,
+			&quot;description&quot;: &quot;&quot;,
+			&quot;success&quot;: true,
+			&quot;id&quot;: &quot;RKwgZb&quot;,
+			&quot;name&quot;: &quot;02 Hangar 18.mp3&quot;,
+			&quot;size&quot;: 123456,
+			&quot;date_created&quot;: 2020-02-04T18:34:13.466276Z,
+			&quot;date_last_view&quot;: 2020-02-04T18:34:13.466276Z,
+			&quot;mime_type&quot;: &quot;audio/mp3&quot;,
+			&quot;views&quot;: 2,
+			&quot;bandwidth_used&quot;: 1234567890,
+			&quot;thumbnail_href&quot;: &quot;/file/RKwgZb/thumbnail&quot;
+		},
+		{
+			&quot;detail_href&quot;: &quot;/file/DRaL_e/info&quot;,
+			&quot;description&quot;: &quot;&quot;,
+			&quot;success&quot;: true,
+			&quot;id&quot;: &quot;DRaL_e&quot;,
+			&quot;name&quot;: &quot;03 Take No Prisoners.mp3&quot;,
+			&quot;size&quot;: 123456,
+			&quot;date_created&quot;: 2020-02-04T18:34:13.466276Z,
+			&quot;date_last_view&quot;: 2020-02-04T18:34:13.466276Z,
+			&quot;mime_type&quot;: &quot;audio/mp3&quot;,
+			&quot;views&quot;: 3,
+			&quot;bandwidth_used&quot;: 1234567890,
+			&quot;thumbnail_href&quot;: &quot;/file/DRaL_e/thumbnail&quot;
+		}
+	]
+}
+</code></pre>
+
+<p>HTTP 404: Not Found</p>
+
+<pre><code>{
+	&quot;success&quot;: false,
+	&quot;value&quot;: &quot;list_not_found&quot;,
+}
+</code></pre>
+
+<p></div>
+</details></p>
+
+<h2 id="user-methods">User Methods</h2>
+
+<p>These methods all require authentication.</p>
+
+<p><details class="api_doc_details request_get">
+    <summary><span class="method">GET</span>/user/files</summary>
+    <div>
+    Documentation pending. Click here to see the response for your account:
+	<a href="/api/user/files">/user/files</a>.
+    </div>
+</details>
+<details class="api_doc_details request_get">
+    <summary><span class="method">GET</span>/user/lists</summary>
+    <div>
+    Documentation pending. Click here to see the response for your account:
+	<a href="/api/user/lists">/user/lists</a>.
+    </div>
+</details></p>
+
+				</section>
+			</div>
+		
+
+<footer>
+	<div class="footer_content">
+		<div style="display: inline-block; margin: 0 8px;">
+			Pixeldrain is a product by <a href="//fornaxian.tech" target="_blank">Fornaxian Technologies</a>
+		</div>
+		<br/>
+		<div style="display: inline-block; margin: 0 8px;">
+			<a href="https://www.patreon.com/pixeldrain" target="_blank"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 100 100">
+  <g fill="#ffffff" fill-rule="evenodd">
+    <path d="M64.1102,0.1004 C44.259,0.1004 28.1086,16.2486 28.1086,36.0986 C28.1086,55.8884 44.259,71.989 64.1102,71.989 C83.9,71.989 100,55.8884 100,36.0986 C100,16.2486 83.9,0.1004 64.1102,0.1004"/>
+    <polygon points=".012 95.988 17.59 95.988 17.59 .1 .012 .1"/>
+  </g>
+</svg>
+ Patreon</a> |
+			<a href="https://reddit.com/r/pixeldrain" target="_blank"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="24" height="24" viewBox="0 0 24 24">
+	<path fill="#ffffff" d="M22,12.14C22,10.92 21,9.96 19.81,9.96C19.22,9.96 18.68,10.19 18.29,10.57C16.79,9.5 14.72,8.79 12.43,8.7L13.43,4L16.7,4.71C16.73,5.53 17.41,6.19 18.25,6.19C19.11,6.19 19.81,5.5 19.81,4.63C19.81,3.77 19.11,3.08 18.25,3.08C17.65,3.08 17.11,3.43 16.86,3.95L13.22,3.18C13.11,3.16 13,3.18 12.93,3.24C12.84,3.29 12.79,3.38 12.77,3.5L11.66,8.72C9.33,8.79 7.23,9.5 5.71,10.58C5.32,10.21 4.78,10 4.19,10C2.97,10 2,10.96 2,12.16C2,13.06 2.54,13.81 3.29,14.15C3.25,14.37 3.24,14.58 3.24,14.81C3.24,18.18 7.16,20.93 12,20.93C16.84,20.93 20.76,18.2 20.76,14.81C20.76,14.6 20.75,14.37 20.71,14.15C21.46,13.81 22,13.04 22,12.14M7,13.7C7,12.84 7.68,12.14 8.54,12.14C9.4,12.14 10.1,12.84 10.1,13.7A1.56,1.56 0 0,1 8.54,15.26C7.68,15.28 7,14.56 7,13.7M15.71,17.84C14.63,18.92 12.59,19 12,19C11.39,19 9.35,18.9 8.29,17.84C8.13,17.68 8.13,17.43 8.29,17.27C8.45,17.11 8.7,17.11 8.86,17.27C9.54,17.95 11,18.18 12,18.18C13,18.18 14.47,17.95 15.14,17.27C15.3,17.11 15.55,17.11 15.71,17.27C15.85,17.43 15.85,17.68 15.71,17.84M15.42,15.28C14.56,15.28 13.86,14.58 13.86,13.72A1.56,1.56 0 0,1 15.42,12.16C16.28,12.16 17,12.86 17,13.72C17,14.56 16.28,15.28 15.42,15.28Z" />
+</svg>
+ Reddit</a> |
+			<a href="https://github.com/Fornaxian" target="_blank"><svg role="img" viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+	<title>GitHub</title>
+	<path fill="#ffffff" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+</svg>
+ GitHub</a> |
+			<a href="https://mastodon.social/web/@fornax" target="_blank"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 216.4144 232.00976">
+  <path fill="#ffffff" d="M211.80734 139.0875c-3.18125 16.36625-28.4925 34.2775-57.5625 37.74875-15.15875 1.80875-30.08375 3.47125-45.99875 2.74125-26.0275-1.1925-46.565-6.2125-46.565-6.2125 0 2.53375.15625 4.94625.46875 7.2025 3.38375 25.68625 25.47 27.225 46.39125 27.9425 21.11625.7225 39.91875-5.20625 39.91875-5.20625l.8675 19.09s-14.77 7.93125-41.08125 9.39c-14.50875.7975-32.52375-.365-53.50625-5.91875C9.23234 213.82 1.40609 165.31125.20859 116.09125c-.365-14.61375-.14-28.39375-.14-39.91875 0-50.33 32.97625-65.0825 32.97625-65.0825C49.67234 3.45375 78.20359.2425 107.86484 0h.72875c29.66125.2425 58.21125 3.45375 74.8375 11.09 0 0 32.975 14.7525 32.975 65.0825 0 0 .41375 37.13375-4.59875 62.915"/>
+  <path fill="#000000" d="M177.50984 80.077v60.94125h-24.14375v-59.15c0-12.46875-5.24625-18.7975-15.74-18.7975-11.6025 0-17.4175 7.5075-17.4175 22.3525v32.37625H96.20734V85.42325c0-14.845-5.81625-22.3525-17.41875-22.3525-10.49375 0-15.74 6.32875-15.74 18.7975v59.15H38.90484V80.077c0-12.455 3.17125-22.3525 9.54125-29.675 6.56875-7.3225 15.17125-11.07625 25.85-11.07625 12.355 0 21.71125 4.74875 27.8975 14.2475l6.01375 10.08125 6.015-10.08125c6.185-9.49875 15.54125-14.2475 27.8975-14.2475 10.6775 0 19.28 3.75375 25.85 11.07625 6.36875 7.3225 9.54 17.22 9.54 29.675"/>
+</svg>
+ Mastodon</a>
+		</div>
+		<br/>
+		<div style="display: inline-block; margin: 0 8px;">
+			
+			Server speed: 66.33 Gbps |
+			Cache cluster: 667.8 Gbps |
+			Storage cluster: 126.0 Gbps
+		</div>
+		<br/>
+		<span class="small_footer_text" style="font-size: .75em; line-height: .75em;">
+			page rendered by sg03
+		</span>
+	</div>
+</footer>
+
+</div>
+
+		<script defer data-domain="pixeldrain.com" src="https://stats.pixeldrain.com/js/script.js"></script>
+	</body>
+</html>

@@ -5,6 +5,11 @@ target/
 go-pd/
 pixeldrain_api_client/
 
+# Reference folders
+g/
+h/
+i/
+
 # IDE files
 .vscode/
 .idea/
