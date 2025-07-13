@@ -51,6 +51,8 @@ struct AppState {
     // Debug info
     debug_messages: Vec<String>,
     last_operation_time: Option<DateTime<Utc>>,
+    // Theme
+    dark_mode: bool,
 }
 
 impl Default for AppState {
@@ -65,6 +67,7 @@ impl Default for AppState {
             user_info: None,
             debug_messages: Vec::new(),
             last_operation_time: None,
+            dark_mode: false,
         }
     }
 }
@@ -196,6 +199,15 @@ impl Default for PixelDrainApp {
 
 impl App for PixelDrainApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Apply theme on first update
+        static mut FIRST_UPDATE: bool = true;
+        unsafe {
+            if FIRST_UPDATE {
+                self.apply_theme_on_startup(ctx);
+                FIRST_UPDATE = false;
+            }
+        }
+        
         egui::CentralPanel::default().show(ctx, |ui| {
             self.render_ui(ui, ctx);
         });
@@ -300,6 +312,35 @@ impl PixelDrainApp {
             }
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Theme toggle button
+                let dark_mode = {
+                    let state = self.state.lock().unwrap();
+                    state.dark_mode
+                };
+                
+                let theme_button_text = if dark_mode { "☀" } else { "🌙" };
+                let tooltip_text = if dark_mode { "Switch to Light Theme" } else { "Switch to Dark Theme" };
+                
+                if ui.button(theme_button_text).on_hover_text(tooltip_text).clicked() {
+                    let new_dark_mode = !dark_mode;
+                    
+                    // Update the theme state
+                    {
+                        let mut state = self.state.lock().unwrap();
+                        state.dark_mode = new_dark_mode;
+                    }
+                    
+                    // Apply theme to the context
+                    if new_dark_mode {
+                        ctx.set_visuals(egui::Visuals::dark());
+                    } else {
+                        ctx.set_visuals(egui::Visuals::light());
+                    }
+                    
+                    // Save settings
+                    self.save_theme_settings(new_dark_mode);
+                }
+                
                 if ui.button("🔧 Debug").clicked() {
                     self.show_debug = !self.show_debug;
                 }
@@ -377,8 +418,28 @@ impl PixelDrainApp {
         }
 
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label("File to upload:");
+                    ui.vertical(|ui| {
+            // Show upload mode (Anonymous vs Authenticated)
+            let (api_key_set, env_key_set) = {
+                let api_key_set = self.has_api_key();
+                let env_key_set = self.has_env_api_key();
+                (api_key_set, env_key_set)
+            };
+            
+            if api_key_set || env_key_set {
+                ui.colored_label(egui::Color32::GREEN, "🔐 Authenticated Upload");
+                if env_key_set {
+                    ui.label("Using API key from environment variable");
+                } else {
+                    ui.label("Using API key from settings");
+                }
+            } else {
+                ui.colored_label(egui::Color32::BLUE, "👤 Anonymous Upload");
+                ui.label("No API key configured - upload will be anonymous");
+            }
+            
+            ui.separator();
+            ui.label("File to upload:");
                 
                 if let Some(path) = &self.upload_file {
                     // Better file path display with proper wrapping
@@ -604,6 +665,12 @@ impl PixelDrainApp {
         }
 
         ui.vertical(|ui| {
+            // Show download mode
+            ui.colored_label(egui::Color32::BLUE, "⬇ Public File Download");
+            ui.label("Download any public PixelDrain file (no API key required)");
+            
+            ui.separator();
+            
             // URL input
             ui.horizontal(|ui| {
                 ui.label("URL:");
@@ -1221,7 +1288,7 @@ impl PixelDrainApp {
                     }
                 });
                 if self.settings_api_key.is_empty() {
-                    ui.colored_label(egui::Color32::YELLOW, "💡 Environment API key will be used as fallback");
+                    ui.colored_label(egui::Color32::from_rgb(255, 140, 0), "💡 Environment API key will be used as fallback");
                 } else {
                     ui.colored_label(egui::Color32::GREEN, "✅ Settings API key will be used (overrides environment)");
                 }
@@ -1295,7 +1362,21 @@ impl PixelDrainApp {
     }
 
     fn about_tab(&mut self, ui: &mut egui::Ui) {
+        // Display the app icon at 48x48 size
+        if let Some(icon_data) = icon_data_from_png() {
+            let texture_id = ui.ctx().load_texture(
+                "app_icon",
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [icon_data.width as usize, icon_data.height as usize],
+                    &icon_data.rgba,
+                ),
+                Default::default(),
+            );
+            ui.add(egui::Image::new((texture_id.id(), egui::Vec2::new(48.0, 48.0))));
+        }
+        
         ui.label("PixelDrain Client");
+        ui.label("Copyright (c) 2025 Genxster1998");
         ui.label("A modern desktop client for PixelDrain file sharing service.");
         ui.label("Built with Rust and egui.");
         ui.label("Version: 0.1.0");
@@ -1306,12 +1387,13 @@ impl PixelDrainApp {
         ui.separator();
         
         ui.label("Features:");
-        ui.label("• 📤 Upload files with progress tracking");
-        ui.label("• 📥 Download files from PixelDrain URLs");
+        ui.label("• 📤 Upload files with progress tracking (anonymous or authenticated)");
+        ui.label("• 📥 Download files from PixelDrain URLs (no API key required)");
         ui.label("• 📋 Copy shareable links to clipboard");
         ui.label("• 📁 Manage your uploaded files");
         ui.label("• ⚙ Configure API key and settings");
         ui.label("• 🔑 Environment variable support (PIXELDRAIN_API_KEY)");
+        ui.label("• 👤 Anonymous upload support (no account required)");
         
         ui.separator();
         
@@ -1331,6 +1413,8 @@ impl PixelDrainApp {
             let _ = webbrowser::open("https://github.com/jkawamoto/go-pixeldrain");
         }
     }
+
+
 
     fn render_error_popup(&mut self, ctx: &egui::Context) {
         let mut show_error = self.show_error;
@@ -1958,6 +2042,18 @@ impl PixelDrainApp {
         }
     }
     
+    fn save_theme_settings(&self, dark_mode: bool) {
+        let mut state = self.state.lock().unwrap();
+        state.dark_mode = dark_mode;
+        
+        // Try to save settings to file
+        if let Err(e) = self.persist_settings(&state) {
+            state.last_error = Some(format!("Failed to save theme settings: {}", e));
+        } else {
+            state.last_error = None;
+        }
+    }
+    
     fn persist_settings(&self, state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
         use std::fs;
         use serde_json;
@@ -2025,6 +2121,8 @@ impl PixelDrainApp {
                 } else {
                     state.download_location = Self::get_default_download_location();
                 }
+                // Load theme preference
+                state.dark_mode = loaded_state.dark_mode;
                 // Don't overwrite history and other runtime data
             } else {
                 // If settings file is corrupted, set default download location
@@ -2035,6 +2133,19 @@ impl PixelDrainApp {
             // If no settings file exists, set default download location
             let mut state = self.state.lock().unwrap();
             state.download_location = Self::get_default_download_location();
+        }
+    }
+    
+    fn apply_theme_on_startup(&self, ctx: &egui::Context) {
+        let dark_mode = {
+            let state = self.state.lock().unwrap();
+            state.dark_mode
+        };
+        
+        if dark_mode {
+            ctx.set_visuals(egui::Visuals::dark());
+        } else {
+            ctx.set_visuals(egui::Visuals::light());
         }
     }
 
@@ -2138,8 +2249,8 @@ fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([300.0, 500.0])
-        .with_min_inner_size([300.0, 400.0]);
+        .with_inner_size([600.0, 400.0])
+        .with_min_inner_size([400.0, 300.0]);
     if let Some(icon) = icon_data_from_png() {
         viewport = viewport.with_icon(icon);
     }
