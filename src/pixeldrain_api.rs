@@ -23,10 +23,10 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 #[derive(Debug, Deserialize)]
 struct ApiErrorResponse {
-    pub success: Option<bool>,
+    pub _success: Option<bool>,
     pub value: Option<String>,
     pub message: Option<String>,
-    pub errors: Option<Vec<ApiErrorResponse>>,
+    pub _errors: Option<Vec<ApiErrorResponse>>,
 }
 
 // ============================================================================
@@ -59,16 +59,6 @@ impl Default for PixelDrainConfig {
 impl PixelDrainConfig {
     pub fn with_api_key(mut self, api_key: String) -> Self {
         self.api_key = Some(api_key);
-        self
-    }
-
-    pub fn with_real_ip(mut self, real_ip: String) -> Self {
-        self.real_ip = Some(real_ip);
-        self
-    }
-
-    pub fn with_real_agent(mut self, real_agent: String) -> Self {
-        self.real_agent = Some(real_agent);
         self
     }
 }
@@ -123,14 +113,6 @@ impl PixelDrainClient {
     }
 
     // Enhanced error handling based on pixeldrain_api_client patterns
-    fn is_server_error(status: StatusCode) -> bool {
-        status.as_u16() >= 500
-    }
-
-    fn is_client_error(status: StatusCode) -> bool {
-        status.as_u16() >= 400 && status.as_u16() < 500
-    }
-
     fn parse_json_response<T>(resp: reqwest::blocking::Response) -> Result<T, PixelDrainError>
     where
         T: for<'de> Deserialize<'de>,
@@ -722,6 +704,70 @@ impl PixelDrainClient {
             value: "error".to_string(),
             message: "PUT Upload failed after all retry attempts".to_string(),
         })))
+    }
+
+    /// Upload a stream using PUT /api/file/{filename} (like Go CLI)
+    pub fn upload_stream_put<R: Read + Send + 'static>(
+        &self,
+        reader: R,
+        filename: &str,
+        progress: Option<ProgressCallback>,
+    ) -> Result<UploadResponse, PixelDrainError> {
+        
+        // Create a progress reader that wraps the input stream
+        struct ProgressReader<R: Read> {
+            inner: R,
+            read: u64,
+            cb: Option<ProgressCallback>,
+        }
+
+        impl<R: Read> ProgressReader<R> {
+            fn new(inner: R, cb: Option<ProgressCallback>) -> Self {
+                Self {
+                    inner,
+                    read: 0,
+                    cb,
+                }
+            }
+        }
+
+        impl<R: Read> Read for ProgressReader<R> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let bytes_read = self.inner.read(buf)?;
+                self.read += bytes_read as u64;
+                
+                // Call progress callback (estimate based on bytes read)
+                if let Some(ref mut cb) = self.cb {
+                    // Estimate progress: assume 100MB = 100% for unknown sizes
+                    let estimated_progress = (self.read as f32 / (100 * 1024 * 1024) as f32).min(1.0);
+                    cb.lock().unwrap()(estimated_progress);
+                }
+                
+                Ok(bytes_read)
+            }
+        }
+
+        let progress_reader = ProgressReader::new(reader, progress);
+        
+        // Build the PUT request with streaming body
+        let mut request = self.build_request(reqwest::Method::PUT, &format!("file/{}", urlencoding::encode(filename)));
+        request = request.body(reqwest::blocking::Body::new(progress_reader));
+        
+        // Send the request
+        let resp = request.send()?;
+        let status = resp.status();
+        
+        if !status.is_success() {
+            let error_text = resp.text().unwrap_or_default();
+            return Err(PixelDrainError::Api(ApiError {
+                status,
+                value: "error".to_string(),
+                message: error_text,
+            }));
+        }
+        
+        let response: UploadResponse = resp.json()?;
+        Ok(response)
     }
 
     /// Get rate limits from the server

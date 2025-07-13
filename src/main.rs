@@ -13,6 +13,7 @@ use std::env;
 use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
 
 // Embed the icon as data bytes at compile time for future use
 const ICON_DATA: &[u8] = include_bytes!("../assets/icon.png");
@@ -92,6 +93,8 @@ struct PixelDrainApp {
     upload_file: Option<PathBuf>,
     upload_custom_filename: String,
     upload_files: Vec<PathBuf>, // Multiple files for upload
+    upload_directory: Option<PathBuf>, // Directory for upload
+    upload_directory_name: String, // Custom name for directory archive
     upload_thread_running: Arc<Mutex<bool>>,
     // Download
     download_url: String,
@@ -153,6 +156,8 @@ impl Default for PixelDrainApp {
             upload_file: None,
             upload_custom_filename: String::new(),
             upload_files: Vec::new(),
+            upload_directory: None,
+            upload_directory_name: String::new(),
             upload_thread_running: Arc::new(Mutex::new(false)),
             download_url: String::new(),
             download_progress: Arc::new(Mutex::new(0.0)),
@@ -418,28 +423,77 @@ impl PixelDrainApp {
                             });
                         }
                     });
+                } else if let Some(dir_path) = &self.upload_directory {
+                    // Display directory
+                    ui.add_space(5.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("📂");
+                        ui.add(egui::Label::new(dir_path.display().to_string()).wrap());
+                    });
+                    
+                    // Directory rename option
+                    ui.separator();
+                    ui.label("📝 Rename archive (optional):");
+                    let original_name = dir_path.file_name().unwrap_or_default().to_string_lossy();
+                    ui.horizontal(|ui| {
+                        if self.upload_directory_name.is_empty() {
+                            ui.text_edit_singleline(&mut self.upload_directory_name);
+                            if ui.button("Use original").clicked() {
+                                self.upload_directory_name = format!("{}.tar.gz", original_name);
+                            }
+                        } else {
+                            ui.text_edit_singleline(&mut self.upload_directory_name);
+                            if ui.button("Clear").clicked() {
+                                self.upload_directory_name.clear();
+                            }
+                        }
+                    });
+                    if !self.upload_directory_name.is_empty() {
+                        ui.label(format!("Will upload as: {}", self.upload_directory_name));
+                    } else {
+                        ui.label(format!("Will upload as: {}.tar.gz", original_name));
+                    }
                 } else {
-                    ui.label("📁 No file selected");
+                    ui.label("📁 No file or directory selected");
                 }
                 
-                if ui.button("📁 Select Files").clicked() {
-                    if let Some(paths) = FileDialog::new().pick_files() {
-                        if paths.len() == 1 {
-                            // Single file selected
-                            self.upload_file = Some(paths[0].clone());
-                            self.upload_files.clear();
-                        } else {
-                            // Multiple files selected
-                            self.upload_files = paths;
-                            self.upload_file = None;
+                ui.horizontal(|ui| {
+                    if ui.button("📁 Select Files").clicked() {
+                        if let Some(paths) = FileDialog::new().pick_files() {
+                            if paths.len() == 1 {
+                                // Single file selected
+                                self.upload_file = Some(paths[0].clone());
+                                self.upload_files.clear();
+                                self.upload_directory = None;
+                            } else {
+                                // Multiple files selected
+                                self.upload_files = paths;
+                                self.upload_file = None;
+                                self.upload_directory = None;
+                            }
+                            self.upload_custom_filename.clear();
+                            self.upload_directory_name.clear();
+                            // Reset progress
+                            *self.upload_progress.lock().unwrap() = 0.0;
+                            // Clear any previous errors
+                            self.state.lock().unwrap().last_error = None;
                         }
-                        self.upload_custom_filename.clear();
-                        // Reset progress
-                        *self.upload_progress.lock().unwrap() = 0.0;
-                        // Clear any previous errors
-                        self.state.lock().unwrap().last_error = None;
                     }
-                }
+                    
+                    if ui.button("📂 Select Directory").clicked() {
+                        if let Some(path) = FileDialog::new().pick_folder() {
+                            self.upload_directory = Some(path);
+                            self.upload_file = None;
+                            self.upload_files.clear();
+                            self.upload_custom_filename.clear();
+                            self.upload_directory_name.clear();
+                            // Reset progress
+                            *self.upload_progress.lock().unwrap() = 0.0;
+                            // Clear any previous errors
+                            self.state.lock().unwrap().last_error = None;
+                        }
+                    }
+                });
 
                 let is_running = *self.upload_thread_running.lock().unwrap();
                 if let Some(_path) = &self.upload_file {
@@ -451,6 +505,11 @@ impl PixelDrainApp {
                     if ui.add_enabled(!is_running, egui::Button::new(button_text)).clicked() {
                         self.start_multiple_upload(self.upload_files.clone(), ctx.clone());
                     }
+                } else if let Some(_dir_path) = &self.upload_directory {
+                    let button_text = if is_running { "⏳ Compressing & Uploading..." } else { "🚀 Upload Directory" };
+                    if ui.add_enabled(!is_running, egui::Button::new(button_text)).clicked() {
+                        self.start_directory_upload(self.upload_directory.clone().unwrap(), ctx.clone());
+                    }
                 } else {
                     ui.add_enabled_ui(false, |ui| {
                         let _ = ui.button("🚀 Upload");
@@ -459,12 +518,20 @@ impl PixelDrainApp {
                 
                 // Show upload progress
                 let progress = *self.upload_progress.lock().unwrap();
-                if progress > 0.0 && progress < 1.0 {
+                let is_running = *self.upload_thread_running.lock().unwrap();
+                if let Some(_dir_path) = &self.upload_directory {
+                    if is_running {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new());
+                            ui.label("Uploading directory...");
+                        });
+                        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                    }
+                } else if progress > 0.0 && progress < 1.0 {
                     ui.label("📤 Uploading...");
                     ui.add(egui::ProgressBar::new(progress).show_percentage());
                     ui.label(format!("Progress: {:.1}%", progress * 100.0));
-                    // Request repaint more frequently for smoother updates
-                    ctx.request_repaint_after(std::time::Duration::from_millis(16)); // ~60 FPS
+                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
                 } else if progress >= 1.0 {
                     ui.label("✅ Upload complete! URL copied to clipboard.");
                 }
@@ -1443,6 +1510,141 @@ impl PixelDrainApp {
                 if let Some(last_entry) = state.upload_history.last() {
                     let _ = Clipboard::new().and_then(|mut c| c.set_text(last_entry.url.clone()));
                 }
+            }
+            
+            *thread_running.lock().unwrap() = false;
+        });
+    }
+
+    fn start_directory_upload(&mut self, dir_path: PathBuf, _ctx: egui::Context) {
+        let progress = self.upload_progress.clone();
+        let state = self.state.clone();
+        let thread_running = self.upload_thread_running.clone();
+        let directory_name = self.upload_directory_name.clone();
+        
+        // Reset progress at start
+        *self.upload_progress.lock().unwrap() = 0.0;
+        *thread_running.lock().unwrap() = true;
+        
+        // Get API key with settings priority
+        let api_key = self.get_api_key();
+        
+        thread::spawn(move || {
+            let config = if let Some(key) = api_key {
+                PixelDrainConfig::default().with_api_key(key)
+            } else {
+                PixelDrainConfig::default()
+            };
+            
+            let client = match PixelDrainClient::new(config) {
+                Ok(client) => client,
+                Err(e) => {
+                    let mut state = state.lock().unwrap();
+                    state.last_error = Some(format!("Failed to create client: {}", e));
+                    *thread_running.lock().unwrap() = false;
+                    return;
+                }
+            };
+            
+            // Determine the archive filename
+            let archive_name = if !directory_name.is_empty() {
+                directory_name
+            } else {
+                let dir_name = dir_path.file_name().unwrap_or_default().to_string_lossy();
+                format!("{}.tar.gz", dir_name)
+            };
+            
+            // Create tar command that compresses to stdout
+            let mut tar_cmd = Command::new("tar");
+            tar_cmd
+                .arg("czf")
+                .arg("-")  // Output to stdout
+                .arg("-C")
+                .arg(dir_path.parent().unwrap_or(&dir_path))
+                .arg(dir_path.file_name().unwrap());
+            
+            // Set up the command with stdout piped
+            tar_cmd.stdout(Stdio::piped());
+            tar_cmd.stderr(Stdio::piped());
+            
+            // Start the tar process
+            let mut tar_process = match tar_cmd.spawn() {
+                Ok(process) => process,
+                Err(e) => {
+                    let mut state = state.lock().unwrap();
+                    state.last_error = Some(format!("Failed to start tar process: {}", e));
+                    *thread_running.lock().unwrap() = false;
+                    return;
+                }
+            };
+            
+            // Get stdout from tar process
+            let tar_stdout = match tar_process.stdout.take() {
+                Some(stdout) => stdout,
+                None => {
+                    let mut state = state.lock().unwrap();
+                    state.last_error = Some("Failed to get tar stdout".to_string());
+                    *thread_running.lock().unwrap() = false;
+                    return;
+                }
+            };
+            
+            // Create a progress callback that simulates progress
+            let progress_cb = Arc::new(Mutex::new(move |p: f32| {
+                let mut progress = progress.lock().unwrap();
+                *progress = p;
+            }));
+            
+            // Upload the compressed data directly from tar stdout (streaming)
+            eprintln!("[DEBUG] Starting streaming upload of tar.gz to {}", archive_name);
+            let result = client.upload_stream_put(tar_stdout, &archive_name, Some(progress_cb));
+            
+            // Wait for tar process to finish
+            let tar_result = tar_process.wait();
+
+            // Print tar stderr if upload fails
+            if let Some(mut tar_stderr) = tar_process.stderr {
+                let mut stderr_output = String::new();
+                use std::io::Read;
+                let _ = tar_stderr.read_to_string(&mut stderr_output);
+                if !stderr_output.trim().is_empty() {
+                    eprintln!("[DEBUG] tar stderr: {}", stderr_output);
+                }
+            }
+            
+            let mut state = state.lock().unwrap();
+            match result {
+                Ok(response) => {
+                    let url = response.get_file_url();
+                    let entry = UploadHistoryEntry {
+                        id: response.id,
+                        url: url.clone(),
+                        filename: archive_name.clone(),
+                        size: 0, // We don't know the exact size since it's streamed
+                        timestamp: Utc::now(),
+                    };
+                    state.upload_history.push(entry);
+                    state.last_error = None;
+                    
+                    // Copy URL to clipboard
+                    let _ = Clipboard::new().and_then(|mut c| c.set_text(url));
+                    
+                    state.debug_messages.push(format!("[{}] Directory uploaded successfully as: {}", 
+                        chrono::Utc::now().format("%H:%M:%S"), archive_name));
+                }
+                Err(e) => {
+                    eprintln!("[DEBUG] Directory upload error: {}", e);
+                    state.last_error = Some(format!("Directory upload error: {}", e));
+                    state.debug_messages.push(format!("[{}] Directory upload failed: {} - {}", 
+                        chrono::Utc::now().format("%H:%M:%S"), archive_name, e));
+                }
+            }
+            
+            // Check if tar process had any errors
+            if let Err(e) = tar_result {
+                eprintln!("[DEBUG] Tar process error: {}", e);
+                state.debug_messages.push(format!("[{}] Tar process error: {}", 
+                    chrono::Utc::now().format("%H:%M:%S"), e));
             }
             
             *thread_running.lock().unwrap() = false;
