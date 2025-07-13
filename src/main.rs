@@ -14,6 +14,7 @@ use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::{Command, Stdio};
+use webbrowser;
 
 // Embed the icon as data bytes at compile time for future use
 const ICON_DATA: &[u8] = include_bytes!("../assets/icon.png");
@@ -1297,6 +1298,10 @@ impl PixelDrainApp {
         ui.label("PixelDrain Client");
         ui.label("A modern desktop client for PixelDrain file sharing service.");
         ui.label("Built with Rust and egui.");
+        ui.label("Version: 0.1.0");
+        if ui.link("🐙 GitHub: https://www.github.com/Genxster1998/Pixeldrain-Rust").clicked() {
+            let _ = webbrowser::open("https://www.github.com/Genxster1998/Pixeldrain-Rust");
+        }
         
         ui.separator();
         
@@ -1310,9 +1315,21 @@ impl PixelDrainApp {
         
         ui.separator();
         
-        ui.label("PixelDrain: https://pixeldrain.com");
-        ui.label("API Documentation: https://pixeldrain.com/api");
-        ui.label("Based on go-pd: https://github.com/ManuelReschke/go-pd");
+        if ui.link("PixelDrain: https://pixeldrain.com").clicked() {
+            let _ = webbrowser::open("https://pixeldrain.com");
+        }
+        if ui.link("API Documentation: https://pixeldrain.com/api").clicked() {
+            let _ = webbrowser::open("https://pixeldrain.com/api");
+        }
+        if ui.link("Official Go Implementation: https://github.com/Fornaxian/pixeldrain_api_client").clicked() {
+            let _ = webbrowser::open("https://github.com/Fornaxian/pixeldrain_api_client");
+        }
+        if ui.link("Based on go-pd: https://github.com/ManuelReschke/go-pd").clicked() {
+            let _ = webbrowser::open("https://github.com/ManuelReschke/go-pd");
+        }
+        if ui.link("Based on go-pd: https://github.com/jkawamoto/go-pixeldrain").clicked() {
+            let _ = webbrowser::open("https://github.com/jkawamoto/go-pixeldrain");
+        }
     }
 
     fn render_error_popup(&mut self, ctx: &egui::Context) {

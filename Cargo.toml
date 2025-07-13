@@ -43,6 +43,9 @@ flate2 = "1.0"
 # For URL encoding
 urlencoding = "2.1"
 
+# For opening URLs in browser
+webbrowser = "0.8"
+
 [profile.release]
 opt-level = 3
 lto = true
