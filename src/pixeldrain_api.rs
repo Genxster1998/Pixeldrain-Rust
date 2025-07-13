@@ -201,16 +201,22 @@ impl PixelDrainClient {
         Self::parse_json_response(resp)
     }
 
-    fn do_multipart<T>(&self, endpoint: &str, form: multipart::Form) -> Result<T, PixelDrainError>
+    fn do_multipart<T>(&self, endpoint: &str, form: multipart::Form, anonymous: bool) -> Result<T, PixelDrainError>
     where
         T: for<'de> Deserialize<'de>,
     {
-        let req = self.build_request(reqwest::Method::POST, endpoint);
+        let mut req = self.build_request(reqwest::Method::POST, endpoint);
+        
+        // Add anonymous query parameter for uploads
+        if endpoint == "file" {
+            req = req.query(&[("anonymous", anonymous.to_string())]);
+        }
+        
         let resp = req.multipart(form).send()?;
         let status = resp.status();
         
         if self.config.debug {
-            println!("Multipart Request: POST {}", endpoint);
+            println!("Multipart Request: POST {} (anonymous: {})", endpoint, anonymous);
             println!("Response Status: {}", status);
         }
 
@@ -280,7 +286,9 @@ impl PixelDrainClient {
 
             let form = multipart::Form::new().part("file", part);
 
-            match self.do_multipart("file", form) {
+            // Determine if this should be an anonymous upload
+            let anonymous = self.config.api_key.is_none();
+            match self.do_multipart("file", form, anonymous) {
                 Ok(result) => {
                     // Reset progress to 100% when complete
                     if let Some(progress) = &progress {
