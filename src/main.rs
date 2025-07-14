@@ -351,28 +351,26 @@ impl PixelDrainApp {
         }
 
         ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-            // Show upload mode (Anonymous vs Authenticated)
-            let (api_key_set, env_key_set) = {
-                let api_key_set = self.has_api_key();
-                let env_key_set = self.has_env_api_key();
-                (api_key_set, env_key_set)
-            };
-            
-            if api_key_set || env_key_set {
-                ui.colored_label(egui::Color32::GREEN, "🔐 Authenticated Upload");
-                if env_key_set {
-                    ui.label("Using API key from environment variable");
+            ui.vertical(|ui| {
+                // Only show authenticated upload mode
+                let (api_key_set, env_key_set) = {
+                    let api_key_set = self.has_api_key();
+                    let env_key_set = self.has_env_api_key();
+                    (api_key_set, env_key_set)
+                };
+                if api_key_set || env_key_set {
+                    ui.colored_label(egui::Color32::GREEN, "🔐 Authenticated Upload");
+                    if env_key_set {
+                        ui.label("Using API key from environment variable");
+                    } else {
+                        ui.label("Using API key from settings");
+                    }
                 } else {
-                    ui.label("Using API key from settings");
+                    ui.colored_label(egui::Color32::RED, "❌ No API key configured - upload is not possible");
+                    ui.label("Please enter your API key in settings to enable uploads.");
                 }
-            } else {
-                ui.colored_label(egui::Color32::BLUE, "👤 Anonymous Upload");
-                ui.label("No API key configured - upload will be anonymous");
-            }
-            
-            ui.separator();
-            ui.label("File to upload:");
+                ui.separator();
+                ui.label("File to upload:");
                 
                 if let Some(path) = &self.upload_file {
                     // Better file path display with proper wrapping
@@ -1313,13 +1311,12 @@ impl PixelDrainApp {
         ui.separator();
         
         ui.label("Features:");
-        ui.label("• 📤 Upload files with progress tracking (anonymous or authenticated)");
+        ui.label("• 📤 Upload files with progress tracking (API key required)");
         ui.label("• 📥 Download files from PixelDrain URLs (no API key required)");
         ui.label("• 📋 Copy shareable links to clipboard");
         ui.label("• 📁 Manage your uploaded files");
         ui.label("• ⚙ Configure API key and settings");
         ui.label("• 🔑 Environment variable support (PIXELDRAIN_API_KEY)");
-        ui.label("• 👤 Anonymous upload support (no account required)");
         
         ui.separator();
         
@@ -1362,6 +1359,11 @@ impl PixelDrainApp {
     fn start_upload(&mut self, path: PathBuf, ctx: egui::Context) {
         // Get API key with settings priority
         let api_key = self.get_api_key();
+        if api_key.is_none() {
+            let mut state = self.state.lock().unwrap();
+            state.last_error = Some("API key required for upload. Please set your API key in settings.".to_string());
+            return;
+        }
         
         let progress = self.upload_progress.clone();
         let state = self.state.clone();
@@ -1439,8 +1441,12 @@ impl PixelDrainApp {
     }
 
     fn start_multiple_upload(&mut self, paths: Vec<PathBuf>, ctx: egui::Context) {
-        // Get API key with settings priority
         let api_key = self.get_api_key();
+        if api_key.is_none() {
+            let mut state = self.state.lock().unwrap();
+            state.last_error = Some("API key required for upload. Please set your API key in settings.".to_string());
+            return;
+        }
         
         let progress = self.upload_progress.clone();
         let state = self.state.clone();
@@ -1532,6 +1538,13 @@ impl PixelDrainApp {
     }
 
     fn start_directory_upload(&mut self, dir_path: PathBuf, _ctx: egui::Context) {
+        let api_key = self.get_api_key();
+        if api_key.is_none() {
+            let mut state = self.state.lock().unwrap();
+            state.last_error = Some("API key required for upload. Please set your API key in settings.".to_string());
+            return;
+        }
+        
         let progress = self.upload_progress.clone();
         let state = self.state.clone();
         let thread_running = self.upload_thread_running.clone();

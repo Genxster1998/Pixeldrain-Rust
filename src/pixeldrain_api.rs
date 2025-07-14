@@ -90,27 +90,20 @@ impl PixelDrainClient {
     // Core Request Methods
     // ============================================================================
 
-    fn build_request(&self, method: reqwest::Method, endpoint: &str, anonymous: bool) -> reqwest::blocking::RequestBuilder {
+    fn build_request(&self, method: reqwest::Method, endpoint: &str) -> reqwest::blocking::RequestBuilder {
         let url = format!("{}/{}", API_URL, endpoint.trim_start_matches('/'));
         let mut req = self.client.request(method, &url);
-        
-        // Add Basic Auth header ONLY if not anonymous and API key is available
-        if !anonymous {
-            if let Some(api_key) = &self.config.api_key {
-                let auth_header = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!(":{}", api_key)));
-                req = req.header(header::AUTHORIZATION, auth_header);
-            }
+        // Always require API key for uploads
+        if let Some(api_key) = &self.config.api_key {
+            let auth_header = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!(":{}", api_key)));
+            req = req.header(header::AUTHORIZATION, auth_header);
         }
-
-        // Add custom headers for proxy/load balancer scenarios
         if let Some(real_ip) = &self.config.real_ip {
             req = req.header("X-Real-IP", real_ip);
         }
-        
         if let Some(real_agent) = &self.config.real_agent {
             req = req.header("User-Agent", real_agent);
         }
-        
         req
     }
 
@@ -162,7 +155,7 @@ impl PixelDrainClient {
     {
         let method_str = method.as_str();
         // Most API requests require authentication, so default to false for anonymous
-        let mut req = self.build_request(method.clone(), endpoint, false);
+        let mut req = self.build_request(method.clone(), endpoint);
         
         if let Some(body) = body {
             req = req.body(body);
@@ -185,7 +178,7 @@ impl PixelDrainClient {
     {
         let method_str = method.as_str();
         // Form requests typically require authentication, so default to false for anonymous
-        let mut req = self.build_request(method.clone(), endpoint, false);
+        let mut req = self.build_request(method.clone(), endpoint);
         
         // Build form data using reqwest's built-in form support
         let mut form_params = Vec::new();
@@ -205,48 +198,27 @@ impl PixelDrainClient {
         Self::parse_json_response(resp)
     }
 
-    fn do_multipart<T>(&self, endpoint: &str, form: multipart::Form, anonymous: bool) -> Result<T, PixelDrainError>
+    fn do_multipart<T>(&self, endpoint: &str, form: multipart::Form) -> Result<T, PixelDrainError>
     where
         T: for<'de> Deserialize<'de>,
     {
         let url = format!("{}/{}", API_URL, endpoint.trim_start_matches('/'));
         let mut req = self.client.request(reqwest::Method::POST, &url);
-        
-        // Add Basic Auth header ONLY if not anonymous and API key is available
-        if self.config.debug {
-            println!("do_multipart - anonymous: {}, API key present: {}", anonymous, self.config.api_key.is_some());
+        // Always require API key for uploads
+        if let Some(api_key) = &self.config.api_key {
+            let auth_header = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!(":{}", api_key)));
+            req = req.header(header::AUTHORIZATION, auth_header);
         }
-        if !anonymous {
-            if let Some(api_key) = &self.config.api_key {
-                let auth_header = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!(":{}", api_key)));
-                req = req.header(header::AUTHORIZATION, auth_header);
-                if self.config.debug {
-                    println!("Added Basic Auth header for API key");
-                }
-            }
-        } else {
-            if self.config.debug {
-                println!("Skipping Basic Auth header (anonymous upload)");
-            }
-        }
-        // Add custom headers for proxy/load balancer scenarios
         if let Some(real_ip) = &self.config.real_ip {
             req = req.header("X-Real-IP", real_ip);
         }
         if let Some(real_agent) = &self.config.real_agent {
             req = req.header("User-Agent", real_agent);
         }
-        // Add anonymous query parameter for uploads
-        if endpoint == "file" {
-            req = req.query(&[("anonymous", anonymous.to_string())]);
-            if self.config.debug {
-                println!("Request URL: {}/file?anonymous={}", API_URL, anonymous);
-            }
-        }
         let resp = req.multipart(form).send()?;
         let status = resp.status();
         if self.config.debug {
-            println!("Multipart Request: POST {} (anonymous: {})", endpoint, anonymous);
+            println!("Multipart Request: POST {}", endpoint);
             println!("Response Status: {}", status);
             println!("API Key present: {}", self.config.api_key.is_some());
             if let Some(api_key) = &self.config.api_key {
@@ -279,6 +251,10 @@ impl PixelDrainClient {
         
         if !file_path.exists() {
             return Err(PixelDrainError::FileNotFound(file_path.display().to_string()));
+        }
+
+        if self.config.api_key.is_none() {
+            return Err(PixelDrainError::MissingApiKey);
         }
 
         let file_name = file_path
@@ -318,12 +294,7 @@ impl PixelDrainClient {
 
             let form = multipart::Form::new().part("file", part);
 
-                    // Determine if this should be an anonymous upload
-        let anonymous = self.config.api_key.is_none();
-        if self.config.debug {
-            println!("Upload file - API key present: {}, anonymous: {}", self.config.api_key.is_some(), anonymous);
-        }
-        match self.do_multipart("file", form, anonymous) {
+            match self.do_multipart("file", form) {
                 Ok(result) => {
                     // Reset progress to 100% when complete
                     if let Some(progress) = &progress {
@@ -376,7 +347,7 @@ impl PixelDrainClient {
         save_path: &Path,
         progress: Option<ProgressCallback>,
     ) -> Result<(), PixelDrainError> {
-        let url = format!("{}/file/{}", API_URL, file_id);
+        let url = format!("{}/file/{}/download", API_URL, file_id);
         
         // Retry logic similar to go-pd
         const MAX_RETRIES: usize = 5;
@@ -521,7 +492,7 @@ impl PixelDrainClient {
 
     /// Get file information using GET /api/file/{id}
     pub fn get_file_info(&self, file_id: &str) -> Result<FileInfo, PixelDrainError> {
-        self.do_request(reqwest::Method::GET, &format!("file/{}", file_id), None)
+        self.do_request(reqwest::Method::GET, &format!("file/{}/info", file_id), None)
     }
 
     /// Get user files using GET /api/user/files
@@ -551,6 +522,10 @@ impl PixelDrainClient {
         
         if !file_path.exists() {
             return Err(PixelDrainError::FileNotFound(file_path.display().to_string()));
+        }
+
+        if self.config.api_key.is_none() {
+            return Err(PixelDrainError::MissingApiKey);
         }
 
         let file_size = file_path.metadata()?.len();
@@ -638,12 +613,15 @@ impl PixelDrainClient {
         progress: Option<ProgressCallback>,
     ) -> Result<UploadResponse, PixelDrainError> {
         
+        if self.config.api_key.is_none() {
+            return Err(PixelDrainError::MissingApiKey);
+        }
+
         // Create a progress reader that works for streaming uploads
         let progress_reader = ProgressReader::new_stream(reader, progress);
         
         // Build the PUT request with streaming body
-        // PUT uploads can be anonymous, so pass true for anonymous
-        let mut request = self.build_request(reqwest::Method::PUT, &format!("file/{}", urlencoding::encode(filename)), true);
+        let mut request = self.build_request(reqwest::Method::PUT, &format!("file/{}", urlencoding::encode(filename)));
         request = request.body(reqwest::blocking::Body::new(progress_reader));
         
         // Send the request
@@ -710,7 +688,7 @@ impl PixelDrainClient {
     /// Get all lists for the user
     pub fn get_user_lists(&self) -> Result<UserListsResponse, PixelDrainError> {
         // User lists require authentication, so pass false for anonymous
-        let request = self.build_request(reqwest::Method::GET, "user/lists", false);
+        let request = self.build_request(reqwest::Method::GET, "user/lists");
         let resp = request.send()?;
         let status = resp.status();
         
@@ -787,7 +765,7 @@ impl PixelDrainClient {
         let req_body = reqwest::blocking::Body::from(body);
         
         // Creating lists requires authentication, so pass false for anonymous
-        let mut request = self.build_request(reqwest::Method::POST, "list", false);
+        let mut request = self.build_request(reqwest::Method::POST, "list");
         request = request.header(header::CONTENT_TYPE, "application/json");
         request = request.body(req_body);
         
@@ -829,7 +807,7 @@ impl PixelDrainClient {
         let req_body = reqwest::blocking::Body::from(body);
         
         // Updating lists requires authentication, so pass false for anonymous
-        let mut request = self.build_request(reqwest::Method::PUT, &format!("list/{}", list_id), false);
+        let mut request = self.build_request(reqwest::Method::PUT, &format!("list/{}", list_id));
         request = request.header(header::CONTENT_TYPE, "application/json");
         request = request.body(req_body);
         
