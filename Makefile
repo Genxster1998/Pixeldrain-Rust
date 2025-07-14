@@ -131,13 +131,13 @@ convert-icons:
 	@echo "🖼️ Converting icons..."
 ifeq ($(DETECTED_OS),windows)
 	@if command -v magick >/dev/null 2>&1; then \
-		magick $(ASSETS_DIR)/icon.png -resize 256x256 $(ASSETS_DIR)/icon.ico; \
+		magick $(ASSETS_DIR)/dark-icon.png -resize 256x256 $(ASSETS_DIR)/icon.ico; \
 	else \
 		echo "ImageMagick not found. Please install it first."; \
 	fi
 else
 	@if command -v convert >/dev/null 2>&1; then \
-		convert $(ASSETS_DIR)/icon.png -resize 256x256 $(ASSETS_DIR)/icon.ico; \
+		convert $(ASSETS_DIR)/dark-icon.png -resize 256x256 $(ASSETS_DIR)/icon.ico; \
 	else \
 		echo "ImageMagick not found. Please install it first."; \
 	fi

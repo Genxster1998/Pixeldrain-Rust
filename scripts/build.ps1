@@ -65,7 +65,7 @@ function Create-WindowsInstaller {
     
     # Convert PNG to ICO if needed
     $IcoFile = Join-Path $AssetsDir "icon.ico"
-    $PngFile = Join-Path $AssetsDir "icon.png"
+    $PngFile = Join-Path $AssetsDir "dark-icon.png"
     
     if (-not (Test-Path $IcoFile)) {
         Convert-PngToIco $PngFile $IcoFile

@@ -85,7 +85,8 @@ create_macos_app() {
     chmod +x "$macos_dir/$APP_NAME"
     
     # Copy icon
-    cp "$ASSETS_DIR/icon.png" "$resources_dir/"
+    cp "$ASSETS_DIR/dark-icon.png" "$resources_dir/"
+    cp "$ASSETS_DIR/light-icon.png" "$resources_dir/"
     
     # Create Info.plist
     cat > "$contents_dir/Info.plist" << EOF
@@ -96,7 +97,7 @@ create_macos_app() {
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>
-    <string>icon.png</string>
+    <string>dark-icon.png</string>
     <key>CFBundleIdentifier</key>
     <string>com.$AUTHOR.$APP_NAME</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -142,7 +143,7 @@ create_macos_dmg() {
     
     create-dmg \
         --volname "PixelDrain $VERSION" \
-        --volicon "$ASSETS_DIR/icon.png" \
+        --volicon "$ASSETS_DIR/dark-icon.png" \
         --window-pos 200 120 \
         --window-size 600 300 \
         --icon-size 100 \
@@ -278,7 +279,7 @@ create_linux_packages() {
     cp "$PROJECT_DIR/build/pixeldrain.desktop" "$usr_share_applications_dir/"
     
     # Copy icon
-    cp "$ASSETS_DIR/icon.png" "$usr_share_icons_dir/pixeldrain.png"
+    cp "$ASSETS_DIR/dark-icon.png" "$usr_share_icons_dir/pixeldrain.png"
     
     # Create control file
     cat > "$debian_dir/control" << EOF
@@ -343,7 +344,7 @@ EOF
         # Copy files to AppDir
         cp "$BUILD_DIR/release/$APP_NAME" "$appimage_dir/AppRun"
         chmod +x "$appimage_dir/AppRun"
-        cp "$ASSETS_DIR/icon.png" "$appimage_dir/pixeldrain.png"
+        cp "$ASSETS_DIR/dark-icon.png" "$appimage_dir/pixeldrain.png"
         cp "$PROJECT_DIR/build/pixeldrain.desktop" "$appimage_dir/"
         
         # Create AppRun script
