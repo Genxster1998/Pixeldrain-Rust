@@ -1373,9 +1373,12 @@ impl PixelDrainApp {
         *self.upload_progress.lock().unwrap() = 0.0;
         *thread_running.lock().unwrap() = true;
         thread::spawn(move || {
+            println!("[DEBUG] start_upload - api_key present: {}", api_key.is_some());
             let config = if let Some(key) = api_key {
+                println!("[DEBUG] Creating config with API key");
                 PixelDrainConfig::default().with_api_key(key)
             } else {
+                println!("[DEBUG] Creating config without API key (anonymous)");
                 PixelDrainConfig::default()
             };
             let client = match PixelDrainClient::new(config) {
