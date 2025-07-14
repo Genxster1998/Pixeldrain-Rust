@@ -627,10 +627,16 @@ impl PixelDrainApp {
             
             // Progress/status
             let progress = *self.download_progress.lock().unwrap();
-            if progress > 0.0 && progress < 1.0 {
-                ui.add(egui::ProgressBar::new(progress).show_percentage());
-            } else if progress >= 1.0 {
-                ui.label("✅ Done");
+            let is_running = *self.download_thread_running.lock().unwrap();
+            if is_running {
+                if progress > 0.0 && progress < 1.0 {
+                    ui.add(egui::ProgressBar::new(progress).show_percentage());
+                } else if progress == 0.0 {
+                    ui.add(egui::Spinner::new());
+                    ui.label("Downloading...");
+                } else if progress >= 1.0 {
+                    ui.label("✅ Done");
+                }
             }
         });
 
