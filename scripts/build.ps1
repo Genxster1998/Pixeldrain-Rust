@@ -62,6 +62,15 @@ function Create-WindowsInstaller {
     }
     
     Write-Host "Creating Windows installer..." -ForegroundColor Blue
+
+    # Ensure LICENSE file is present in dist directory for NSIS
+    $LicenseSrc = Join-Path $ProjectDir "LICENSE"
+    $LicenseDst = Join-Path $DistDir "LICENSE"
+    if (Test-Path $LicenseSrc) {
+        Copy-Item $LicenseSrc $LicenseDst -Force
+    } else {
+        Write-Host "WARNING: LICENSE file not found at $LicenseSrc" -ForegroundColor Yellow
+    }
     
     # Convert PNG to ICO if needed
     $IcoFile = Join-Path $AssetsDir "icon.ico"

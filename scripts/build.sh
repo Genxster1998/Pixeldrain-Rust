@@ -140,6 +140,12 @@ create_macos_dmg() {
     
     local dmg_name="PixelDrain-$VERSION.dmg"
     local app_dir="$DIST_DIR/PixelDrain.app"
+
+    # Delete existing DMG if it exists to avoid hdiutil 'File exists' error
+    if [ -f "$DIST_DIR/$dmg_name" ]; then
+        echo -e "${YELLOW}Removing existing DMG: $DIST_DIR/$dmg_name${NC}"
+        rm "$DIST_DIR/$dmg_name"
+    fi
     
     create-dmg \
         --volname "PixelDrain $VERSION" \
