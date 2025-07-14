@@ -497,6 +497,32 @@ impl PixelDrainClient {
         Ok(())
     }
 
+    /// Fetch a file thumbnail as bytes (in memory) using GET /api/file/{id}/thumbnail?width=x&height=x
+    pub fn fetch_thumbnail_bytes(
+        &self,
+        file_id: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>, PixelDrainError> {
+        let url = format!(
+            "{}/file/{}/thumbnail?width={}&height={}",
+            API_URL, file_id, width, height
+        );
+        let mut resp = self.client.get(&url).send()?;
+        let status = resp.status();
+        if !status.is_success() {
+            let error_text = resp.text().unwrap_or_default();
+            return Err(PixelDrainError::Api(ApiError {
+                status,
+                value: "error".to_string(),
+                message: error_text,
+            }));
+        }
+        let mut buf = Vec::new();
+        resp.copy_to(&mut buf)?;
+        Ok(buf)
+    }
+
     /// Get file information using GET /api/file/{id}
     pub fn get_file_info(&self, file_id: &str) -> Result<FileInfo, PixelDrainError> {
         self.do_request(reqwest::Method::GET, &format!("file/{}/info", file_id), None)

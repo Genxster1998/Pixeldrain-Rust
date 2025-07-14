@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::{Command, Stdio};
 use webbrowser;
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Sender, Receiver};
 
 // Embed both icons as data bytes at compile time for future use
 const LIGHT_ICON_DATA: &[u8] = include_bytes!("../assets/light-icon.png");
@@ -134,6 +135,10 @@ struct PixelDrainApp {
     list_update_loading: Arc<Mutex<bool>>,
     list_delete_loading: Arc<Mutex<bool>>,
     user_info_loading: Arc<Mutex<bool>>,
+    thumbnail_cache: HashMap<String, egui::TextureHandle>,
+    thumbnail_loading: HashMap<String, bool>,
+    thumbnail_rx: Option<Receiver<(String, Vec<u8>)>>,
+    thumbnail_tx: Option<Sender<(String, Vec<u8>)>>,
 }
 
 #[derive(PartialEq)]
@@ -158,6 +163,7 @@ impl Default for Tab {
 
 impl Default for PixelDrainApp {
     fn default() -> Self {
+        let (tx, rx) = mpsc::channel();
         let mut app = Self {
             state: Arc::new(Mutex::new(AppState::default())),
             tab: Tab::default(),
@@ -191,6 +197,10 @@ impl Default for PixelDrainApp {
             list_update_loading: Arc::new(Mutex::new(false)),
             list_delete_loading: Arc::new(Mutex::new(false)),
             user_info_loading: Arc::new(Mutex::new(false)),
+            thumbnail_cache: HashMap::new(),
+            thumbnail_loading: HashMap::new(),
+            thumbnail_rx: Some(rx),
+            thumbnail_tx: Some(tx),
         };
         
         // Load settings on startup
@@ -725,12 +735,44 @@ impl PixelDrainApp {
         } else if !file_list.is_empty() {
             let mut copy_clicked = None;
             let mut delete_clicked = None;
-            
-            egui::ScrollArea::vertical().id_salt("files_list_scroll").show(ui, |ui| {
+            let ctx = ui.ctx().clone();
+            egui::ScrollArea::vertical().show(ui, |ui| {
                 for file in &file_list {
-                    // First line: File name and stats
                     ui.horizontal(|ui| {
-                        ui.label(format!("📄 {}", file.name));
+                        // Thumbnail logic
+                        let has_thumb = !file.thumbnail_href.is_empty();
+                        if has_thumb {
+                            if let Some(tex) = self.thumbnail_cache.get(&file.id) {
+                                ui.add(egui::Image::from_texture(tex).max_size(egui::Vec2::splat(48.0)));
+                            } else if self.thumbnail_loading.get(&file.id).is_none() {
+                                // Start background fetch
+                                self.thumbnail_loading.insert(file.id.clone(), true);
+                                if let Some(tx) = &self.thumbnail_tx {
+                                    let tx = tx.clone();
+                                    let file_id = file.id.clone();
+                                    let api_key = self.get_api_key();
+                                    std::thread::spawn(move || {
+                                        let config = if let Some(key) = api_key {
+                                            pixeldrain_api::PixelDrainConfig::default().with_api_key(key)
+                                        } else {
+                                            pixeldrain_api::PixelDrainConfig::default()
+                                        };
+                                        if let Ok(client) = pixeldrain_api::PixelDrainClient::new(config) {
+                                            if let Ok(bytes) = client.fetch_thumbnail_bytes(&file_id, 48, 48) {
+                                                let _ = tx.send((file_id, bytes));
+                                            }
+                                        }
+                                    });
+                                }
+                                ui.label("🖼");
+                            } else {
+                                ui.label("🖼");
+                            }
+                        } else {
+                            ui.label("📄");
+                        }
+                        // File name and stats
+                        ui.label(format!("{}", file.name));
                         ui.label(format!("({})", self.format_file_size_bytes(file.size)));
                         ui.label(format!("👁 {} views", file.views));
                         ui.label(format!("⬇ {} downloads", file.downloads));
@@ -771,6 +813,26 @@ impl PixelDrainApp {
         // Handle refresh action
         if refresh_clicked {
             self.refresh_file_list();
+        }
+
+        // Handle incoming thumbnails from background thread
+        if let Some(rx) = &self.thumbnail_rx {
+            while let Ok((file_id, bytes)) = rx.try_recv() {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let color_img = egui::ColorImage::from_rgba_unmultiplied([
+                        w as usize, h as usize
+                    ], &rgba);
+                    let tex = ui.ctx().load_texture(
+                        format!("thumb_{}", file_id),
+                        color_img,
+                        Default::default(),
+                    );
+                    self.thumbnail_cache.insert(file_id.clone(), tex);
+                }
+                self.thumbnail_loading.remove(&file_id);
+            }
         }
     }
 
@@ -1813,8 +1875,25 @@ impl PixelDrainApp {
                 match client.get_user_files() {
                     Ok(response) => {
                         let mut state = state.lock().unwrap();
-                        state.file_list = response.files;
+                        state.file_list = response.files.clone();
                         state.last_error = None;
+                        // Prefetch thumbnails for all files with a thumbnail_href
+                        let mut thumbnail_cache: HashMap<String, Vec<u8>> = HashMap::new();
+                        for file in &response.files {
+                            if !file.thumbnail_href.is_empty() {
+                                if let Ok(bytes) = reqwest::blocking::get(&file.thumbnail_href).and_then(|r| r.bytes()) {
+                                    if let Ok(img) = image::load_from_memory(&bytes) {
+                                        let rgba = img.to_rgba8();
+                                        let (w, h) = rgba.dimensions();
+                                        let color_img = egui::ColorImage::from_rgba_unmultiplied([
+                                            w as usize, h as usize
+                                        ], &rgba);
+                                        // Note: TextureHandle must be created on the UI thread, so here we just cache the bytes or ColorImage if needed
+                                        // For now, just store the bytes in a HashMap<String, Vec<u8>> or similar if you want to use it later
+                                    }
+                                }
+                            }
+                        }
                         *files_loading.lock().unwrap() = false;
                         return;
                     }
