@@ -347,7 +347,7 @@ impl PixelDrainClient {
         save_path: &Path,
         progress: Option<ProgressCallback>,
     ) -> Result<(), PixelDrainError> {
-        let url = format!("{}/file/{}/download", API_URL, file_id);
+        let url = format!("{}/file/{}", API_URL, file_id);
         
         // Retry logic similar to go-pd
         const MAX_RETRIES: usize = 5;
@@ -366,7 +366,14 @@ impl PixelDrainClient {
                 progress(0.0);
             }
             
-            let mut resp = match self.client.get(&url).send() {
+            // Build request: only add Authorization if API key is set
+            let mut req = self.client.get(&url);
+            if let Some(api_key) = &self.config.api_key {
+                let auth_header = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!(":{}", api_key)));
+                req = req.header(header::AUTHORIZATION, auth_header);
+            }
+            
+            let mut resp = match req.send() {
                 Ok(resp) => resp,
                 Err(e) => {
                     last_error = Some(PixelDrainError::Reqwest(e));
