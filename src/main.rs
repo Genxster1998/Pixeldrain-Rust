@@ -1366,56 +1366,58 @@ impl PixelDrainApp {
     }
 
     fn about_tab(&mut self, ui: &mut egui::Ui) {
-        // Display the app icon at 48x48 size, switching based on theme
-        let dark_mode = self.state.lock().unwrap().dark_mode;
-        if let Some(icon_data) = icon_data_from_png(dark_mode) {
-            let texture_id = ui.ctx().load_texture(
-                "app_icon",
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [icon_data.width as usize, icon_data.height as usize],
-                    &icon_data.rgba,
-                ),
-                Default::default(),
-            );
-            ui.add(egui::Image::new((texture_id.id(), egui::Vec2::new(48.0, 48.0))));
-        }
-        
-        ui.label("PixelDrain Client");
-        ui.label("Copyright (c) 2025 Genxster1998");
-        ui.label("A modern unofficial desktop client for PixelDrain file sharing service.");
-        ui.label("Built with Rust and egui.");
-        ui.label("Version: 0.1.0");
-        if ui.link("🐙 GitHub: https://www.github.com/Genxster1998/Pixeldrain-Rust").clicked() {
-            let _ = webbrowser::open("https://www.github.com/Genxster1998/Pixeldrain-Rust");
-        }
-        
-        ui.separator();
-        
-        ui.label("Features:");
-        ui.label("• 📤 Upload files and folders with progress tracking (API key required)");
-        ui.label("• 📥 Download files from PixelDrain URLs (no API key required)");
-        ui.label("• 📋 Copy shareable links to clipboard");
-        ui.label("• 📁 Manage your uploaded files");
-        ui.label("• ⚙ Configure API key and settings");
-        ui.label("• 🔑 Environment variable support (PIXELDRAIN_API_KEY)");
-        
-        ui.separator();
-        
-        if ui.link("PixelDrain: https://pixeldrain.com").clicked() {
-            let _ = webbrowser::open("https://pixeldrain.com");
-        }
-        if ui.link("API Documentation: https://pixeldrain.com/api").clicked() {
-            let _ = webbrowser::open("https://pixeldrain.com/api");
-        }
-        if ui.link("Official Go Implementation: https://github.com/Fornaxian/pixeldrain_api_client").clicked() {
-            let _ = webbrowser::open("https://github.com/Fornaxian/pixeldrain_api_client");
-        }
-        if ui.link("Based on go-pd: https://github.com/ManuelReschke/go-pd").clicked() {
-            let _ = webbrowser::open("https://github.com/ManuelReschke/go-pd");
-        }
-        if ui.link("Based on go-pd: https://github.com/jkawamoto/go-pixeldrain").clicked() {
-            let _ = webbrowser::open("https://github.com/jkawamoto/go-pixeldrain");
-        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            // Display the app icon at 48x48 size, switching based on theme
+            let dark_mode = self.state.lock().unwrap().dark_mode;
+            if let Some(icon_data) = icon_data_from_png(dark_mode) {
+                let texture_id = ui.ctx().load_texture(
+                    "app_icon",
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [icon_data.width as usize, icon_data.height as usize],
+                        &icon_data.rgba,
+                    ),
+                    Default::default(),
+                );
+                ui.add(egui::Image::new((texture_id.id(), egui::Vec2::new(48.0, 48.0))));
+            }
+            
+            ui.label("PixelDrain Client");
+            ui.label("Copyright (c) 2025 Genxster1998");
+            ui.label("A modern unofficial desktop client for PixelDrain file sharing service.");
+            ui.label("Built with Rust and egui.");
+            ui.label("Version: 0.1.0");
+            if ui.link("🐙 GitHub: https://www.github.com/Genxster1998/Pixeldrain-Rust").clicked() {
+                let _ = webbrowser::open("https://www.github.com/Genxster1998/Pixeldrain-Rust");
+            }
+            
+            ui.separator();
+            
+            ui.label("Features:");
+            ui.label("• 📤 Upload files and folders with progress tracking (API key required)");
+            ui.label("• 📥 Download files from PixelDrain URLs (no API key required)");
+            ui.label("• 📋 Copy shareable links to clipboard");
+            ui.label("• 📁 Manage your uploaded files");
+            ui.label("• ⚙ Configure API key and settings");
+            ui.label("• 🔑 Environment variable support (PIXELDRAIN_API_KEY)");
+            
+            ui.separator();
+            
+            if ui.link("PixelDrain: https://pixeldrain.com").clicked() {
+                let _ = webbrowser::open("https://pixeldrain.com");
+            }
+            if ui.link("API Documentation: https://pixeldrain.com/api").clicked() {
+                let _ = webbrowser::open("https://pixeldrain.com/api");
+            }
+            if ui.link("Official Go Implementation: https://github.com/Fornaxian/pixeldrain_api_client").clicked() {
+                let _ = webbrowser::open("https://github.com/Fornaxian/pixeldrain_api_client");
+            }
+            if ui.link("Based on go-pd: https://github.com/ManuelReschke/go-pd").clicked() {
+                let _ = webbrowser::open("https://github.com/ManuelReschke/go-pd");
+            }
+            if ui.link("Based on go-pd: https://github.com/jkawamoto/go-pixeldrain").clicked() {
+                let _ = webbrowser::open("https://github.com/jkawamoto/go-pixeldrain");
+            }
+        });
     }
 
 
