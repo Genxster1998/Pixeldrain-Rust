@@ -40,7 +40,8 @@ fn icon_data_from_png(dark_mode: bool) -> Option<IconData> {
 // For runtime icon change (winit backend)
 // Helper to set the window icon at startup and on theme change
 #[cfg(not(target_arch = "wasm32"))]
-fn set_window_icon(native_options: &mut eframe::NativeOptions, dark_mode: bool) {
+#[allow(dead_code)]
+fn set_window_icon(_native_options: &mut eframe::NativeOptions, _dark_mode: bool) {
     // This eframe version doesn't support setting window icon through NativeOptions
     // This function is kept as a placeholder for future eframe versions
 }
@@ -735,7 +736,7 @@ impl PixelDrainApp {
         } else if !file_list.is_empty() {
             let mut copy_clicked = None;
             let mut delete_clicked = None;
-            let ctx = ui.ctx().clone();
+            let _ctx = ui.ctx().clone();
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for file in &file_list {
                     ui.horizontal(|ui| {
@@ -821,12 +822,12 @@ impl PixelDrainApp {
                 if let Ok(img) = image::load_from_memory(&bytes) {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
-                    let color_img = egui::ColorImage::from_rgba_unmultiplied([
+                    let _color_img = egui::ColorImage::from_rgba_unmultiplied([
                         w as usize, h as usize
                     ], &rgba);
                     let tex = ui.ctx().load_texture(
                         format!("thumb_{}", file_id),
-                        color_img,
+                        _color_img,
                         Default::default(),
                     );
                     self.thumbnail_cache.insert(file_id.clone(), tex);
@@ -1878,14 +1879,14 @@ impl PixelDrainApp {
                         state.file_list = response.files.clone();
                         state.last_error = None;
                         // Prefetch thumbnails for all files with a thumbnail_href
-                        let mut thumbnail_cache: HashMap<String, Vec<u8>> = HashMap::new();
+                        let _thumbnail_cache: HashMap<String, Vec<u8>> = HashMap::new();
                         for file in &response.files {
                             if !file.thumbnail_href.is_empty() {
                                 if let Ok(bytes) = reqwest::blocking::get(&file.thumbnail_href).and_then(|r| r.bytes()) {
                                     if let Ok(img) = image::load_from_memory(&bytes) {
                                         let rgba = img.to_rgba8();
                                         let (w, h) = rgba.dimensions();
-                                        let color_img = egui::ColorImage::from_rgba_unmultiplied([
+                                        let _color_img = egui::ColorImage::from_rgba_unmultiplied([
                                             w as usize, h as usize
                                         ], &rgba);
                                         // Note: TextureHandle must be created on the UI thread, so here we just cache the bytes or ColorImage if needed
@@ -2301,6 +2302,7 @@ impl PixelDrainApp {
         Err(last_error.unwrap())
     }
 
+    #[allow(dead_code)]
     fn toggle_theme(&mut self, ctx: &egui::Context) {
         // Toggle dark_mode and update visuals
         {
