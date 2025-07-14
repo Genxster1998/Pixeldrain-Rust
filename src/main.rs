@@ -15,12 +15,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::{Command, Stdio};
 use webbrowser;
+use std::collections::HashMap;
 
-// Embed the icon as data bytes at compile time for future use
-const ICON_DATA: &[u8] = include_bytes!("../assets/icon.png");
+// Embed both icons as data bytes at compile time for future use
+const LIGHT_ICON_DATA: &[u8] = include_bytes!("../assets/light-icon.png");
+const DARK_ICON_DATA: &[u8] = include_bytes!("../assets/dark-icon.png");
 
-fn icon_data_from_png() -> Option<IconData> {
-    if let Ok(img) = image::load_from_memory(ICON_DATA) {
+fn icon_data_from_png(dark_mode: bool) -> Option<IconData> {
+    let icon_bytes = if dark_mode { DARK_ICON_DATA } else { LIGHT_ICON_DATA };
+    if let Ok(img) = image::load_from_memory(icon_bytes) {
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
         Some(IconData {
@@ -31,6 +34,14 @@ fn icon_data_from_png() -> Option<IconData> {
     } else {
         None
     }
+}
+
+// For runtime icon change (winit backend)
+// Helper to set the window icon at startup and on theme change
+#[cfg(not(target_arch = "wasm32"))]
+fn set_window_icon(native_options: &mut eframe::NativeOptions, dark_mode: bool) {
+    // This eframe version doesn't support setting window icon through NativeOptions
+    // This function is kept as a placeholder for future eframe versions
 }
 
 mod pixeldrain_api;
@@ -1292,8 +1303,9 @@ impl PixelDrainApp {
     }
 
     fn about_tab(&mut self, ui: &mut egui::Ui) {
-        // Display the app icon at 48x48 size
-        if let Some(icon_data) = icon_data_from_png() {
+        // Display the app icon at 48x48 size, switching based on theme
+        let dark_mode = self.state.lock().unwrap().dark_mode;
+        if let Some(icon_data) = icon_data_from_png(dark_mode) {
             let texture_id = ui.ctx().load_texture(
                 "app_icon",
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -2066,12 +2078,12 @@ impl PixelDrainApp {
             let state = self.state.lock().unwrap();
             state.dark_mode
         };
-        
         if dark_mode {
             ctx.set_visuals(egui::Visuals::dark());
         } else {
             ctx.set_visuals(egui::Visuals::light());
         }
+        // Window icon setting at runtime is not supported in this eframe version
     }
 
     fn format_file_size(&self, path: &PathBuf) -> String {
@@ -2210,6 +2222,15 @@ impl PixelDrainApp {
         Err(last_error.unwrap())
     }
 
+    fn toggle_theme(&mut self, ctx: &egui::Context) {
+        // Toggle dark_mode and update visuals
+        {
+            let mut state = self.state.lock().unwrap();
+            state.dark_mode = !state.dark_mode;
+        }
+        self.apply_theme_on_startup(ctx);
+        // Runtime window icon update is not supported in this eframe version
+    }
 
 }
 
@@ -2219,7 +2240,7 @@ fn main() -> Result<(), eframe::Error> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([600.0, 400.0])
         .with_min_inner_size([400.0, 300.0]);
-    if let Some(icon) = icon_data_from_png() {
+    if let Some(icon) = icon_data_from_png(true) {
         viewport = viewport.with_icon(icon);
     }
     let options = NativeOptions {
