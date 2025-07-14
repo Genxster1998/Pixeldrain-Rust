@@ -2,7 +2,7 @@
 [package]
 name = "pixeldrain"
 version = "0.1.0"
-edition = "2021"
+edition = "2025"
 authors = ["Genxster1998"]
 description = "Upload and manage files with PixelDrain"
 license = "MIT"

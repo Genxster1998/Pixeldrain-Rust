@@ -161,7 +161,7 @@ create_windows_installer() {
     
     # Convert PNG to ICO if needed
     if [ ! -f "$ASSETS_DIR/icon.ico" ]; then
-        convert_png_to_ico "$ASSETS_DIR/icon.png" "$ASSETS_DIR/icon.ico"
+        convert_png_to_ico "$ASSETS_DIR/dark-icon.png" "$ASSETS_DIR/icon.ico"
     fi
     
     # Create NSIS script

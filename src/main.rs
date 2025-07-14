@@ -1382,7 +1382,7 @@ impl PixelDrainApp {
         
         ui.label("PixelDrain Client");
         ui.label("Copyright (c) 2025 Genxster1998");
-        ui.label("A modern desktop client for PixelDrain file sharing service.");
+        ui.label("A modern unofficial desktop client for PixelDrain file sharing service.");
         ui.label("Built with Rust and egui.");
         ui.label("Version: 0.1.0");
         if ui.link("🐙 GitHub: https://www.github.com/Genxster1998/Pixeldrain-Rust").clicked() {
@@ -1392,7 +1392,7 @@ impl PixelDrainApp {
         ui.separator();
         
         ui.label("Features:");
-        ui.label("• 📤 Upload files with progress tracking (API key required)");
+        ui.label("• 📤 Upload files and folders with progress tracking (API key required)");
         ui.label("• 📥 Download files from PixelDrain URLs (no API key required)");
         ui.label("• 📋 Copy shareable links to clipboard");
         ui.label("• 📁 Manage your uploaded files");

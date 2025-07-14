@@ -1,7 +1,7 @@
 use std::env;
 
 fn main() {
-    println!("cargo:rerun-if-changed=assets/icon.png");
+    println!("cargo:rerun-if-changed=assets/dark-icon.png");
     println!("cargo:rerun-if-changed=build.rs");
     
     // Set up platform-specific build configurations
@@ -16,7 +16,7 @@ fn main() {
 }
 
 fn setup_macos() {
-    println!("cargo:rustc-env=MACOS_ICON=assets/icon.png");
+    println!("cargo:rustc-env=MACOS_ICON=assets/dark-icon.png");
 }
 
 fn setup_windows() {
@@ -42,5 +42,5 @@ fn setup_windows() {
 }
 
 fn setup_linux() {
-    println!("cargo:rustc-env=LINUX_ICON=assets/icon.png");
+    println!("cargo:rustc-env=LINUX_ICON=assets/dark-icon.png");
 } 
