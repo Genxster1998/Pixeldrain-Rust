@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="pixeldrain"
-VERSION="0.1.1"
+VERSION="0.1.2"
 AUTHOR="Genxster1998"
 DESCRIPTION="Upload and manage files with PixelDrain"
 LICENSE="MIT"
@@ -138,7 +138,22 @@ create_macos_dmg() {
         fi
     fi
     
-    local dmg_name="PixelDrain-$VERSION.dmg"
+    # Determine architecture suffix
+    local arch_suffix=""
+    if [[ -n "$BUILD_TARGET" ]]; then
+        case "$BUILD_TARGET" in
+            x86_64-apple-darwin)
+                arch_suffix="x86_64";;
+            aarch64-apple-darwin)
+                arch_suffix="arm64";;
+            *)
+                arch_suffix="$BUILD_TARGET";;
+        esac
+    else
+        arch_suffix="unknown"
+    fi
+    
+    local dmg_name="PixelDrain-$VERSION-macos-$arch_suffix.dmg"
     local app_dir="$DIST_DIR/PixelDrain.app"
 
     # Delete existing DMG if it exists to avoid hdiutil 'File exists' error

@@ -1,7 +1,7 @@
 # This is the Cargo.toml file for a Rust project that uses eframe and egui
 [package]
 name = "pixeldrain"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Genxster1998"]
 description = "Upload and manage files with PixelDrain"

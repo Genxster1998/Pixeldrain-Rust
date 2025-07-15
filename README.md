@@ -31,14 +31,14 @@ You can download the latest pre-built version for your platform from the [Releas
 **Available downloads:**
 
 - **macOS**
-  - Apple Silicon (M1/M2/M3): `PixelDrain-0.1.0-macos-AppleSilicon.dmg`
-  - Intel: `PixelDrain-0.1.0-macos-Intel.dmg`
+  - Apple Silicon (M1/M2/M3): `PixelDrain-0.1.2-macos-arm64.dmg`
+  - Intel: `PixelDrain-0.1.2-macos-x86_64.dmg`
 - **Windows**
-  - Installer: `PixelDrain-0.1.0-Setup.exe`
-  - Portable: `PixelDrain-0.1.0-Portable.zip`
+  - Installer: `PixelDrain-0.1.2-Setup.exe`
+  - Portable: `PixelDrain-0.1.2-Portable.zip`
 - **Linux**
-  - AppImage: `PixelDrain-0.1.0-x86_64.AppImage`
-  - DEB package: `PixelDrain-0.1.0-amd64.deb`
+  - AppImage: `PixelDrain-0.1.2-x86_64.AppImage`
+  - DEB package: `pixeldrain_0.1.2_amd64.deb`
 
 Go to the [Releases](https://github.com/Genxster1998/Pixeldrain-Rust/releases) page, find the latest version, and download the file that matches your operating system and architecture.
 

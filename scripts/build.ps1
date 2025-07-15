@@ -4,7 +4,7 @@
 param(
     [switch]$SkipBuild,
     [switch]$SkipInstaller,
-    [string]$Version = "0.1.1"
+    [string]$Version = "0.1.2"
 )
 
 # Configuration

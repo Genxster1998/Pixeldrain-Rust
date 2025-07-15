@@ -1031,22 +1031,18 @@ impl PixelDrainApp {
         let lists_loading = self.lists_loading.clone();
         let lists = self.lists.clone();
         let list_error = self.list_error.clone();
+        let api_key = self.get_api_key();
         
         thread::spawn(move || {
             // Use the retry utility
             let result = Self::retry_pixeldrain_operation(
                 || {
-                    // Create API client using environment variable
-                    let config = if let Ok(env_key) = env::var("PIXELDRAIN_API_KEY") {
-                        if !env_key.is_empty() {
-                            pixeldrain_api::PixelDrainConfig::default().with_api_key(env_key)
-                        } else {
-                            pixeldrain_api::PixelDrainConfig::default()
-                        }
+                    // Create API client using settings or environment variable
+                    let config = if let Some(key) = api_key.clone() {
+                        pixeldrain_api::PixelDrainConfig::default().with_api_key(key)
                     } else {
                         pixeldrain_api::PixelDrainConfig::default()
                     };
-                    
                     let client = pixeldrain_api::PixelDrainClient::new(config)?;
                     client.get_user_lists()
                 },
@@ -1387,7 +1383,7 @@ impl PixelDrainApp {
             ui.label("Copyright (c) 2025 Genxster1998");
             ui.label("A modern unofficial desktop client for PixelDrain file sharing service.");
             ui.label("Built with Rust and egui.");
-            ui.label("version: 0.1.1");
+            ui.label("Version: 0.1.2");
             if ui.link("🐙 GitHub: https://www.github.com/Genxster1998/Pixeldrain-Rust").clicked() {
                 let _ = webbrowser::open("https://www.github.com/Genxster1998/Pixeldrain-Rust");
             }
