@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="pixeldrain"
-VERSION="0.1.0"
+VERSION="0.1.1"
 AUTHOR="Genxster1998"
 DESCRIPTION="Upload and manage files with PixelDrain"
 LICENSE="MIT"

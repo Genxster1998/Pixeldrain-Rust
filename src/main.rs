@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 // PixelDrain egui App - Clean Modern UI
 use arboard::Clipboard;
 use chrono::{DateTime, Utc};
@@ -1385,7 +1387,7 @@ impl PixelDrainApp {
             ui.label("Copyright (c) 2025 Genxster1998");
             ui.label("A modern unofficial desktop client for PixelDrain file sharing service.");
             ui.label("Built with Rust and egui.");
-            ui.label("Version: 0.1.0");
+            ui.label("version: 0.1.1");
             if ui.link("🐙 GitHub: https://www.github.com/Genxster1998/Pixeldrain-Rust").clicked() {
                 let _ = webbrowser::open("https://www.github.com/Genxster1998/Pixeldrain-Rust");
             }
