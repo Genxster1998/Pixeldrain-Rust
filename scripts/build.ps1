@@ -50,6 +50,16 @@ function Convert-PngToIco {
 function Build-Application {
     if (-not $SkipBuild) {
         Write-Host "Building application..." -ForegroundColor Blue
+        
+        # Ensure ICO file exists before building (needed for build.rs)
+        $IcoFile = Join-Path $AssetsDir "icon.ico"
+        $PngFile = Join-Path $AssetsDir "dark-icon.png"
+        
+        if (-not (Test-Path $IcoFile)) {
+            Write-Host "Creating ICO file for build..." -ForegroundColor Yellow
+            Convert-PngToIco $PngFile $IcoFile
+        }
+        
         cargo build --release
     }
 }
@@ -118,23 +128,22 @@ RequestExecutionLevel admin
 Section "Install"
     SetOutPath "`$INSTDIR"
     File "$ExePath"
-    File "$IcoFile"
     
     ; Create uninstaller
     WriteUninstaller "`$INSTDIR\Uninstall.exe"
     
     ; Create start menu shortcut
     CreateDirectory "`$SMPROGRAMS\PixelDrain"
-    CreateShortCut "`$SMPROGRAMS\PixelDrain\PixelDrain.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\icon.ico"
+    CreateShortCut "`$SMPROGRAMS\PixelDrain\PixelDrain.lnk" "`$INSTDIR\$AppName.exe"
     CreateShortCut "`$SMPROGRAMS\PixelDrain\Uninstall.lnk" "`$INSTDIR\Uninstall.exe"
     
     ; Create desktop shortcut
-    CreateShortCut "`$DESKTOP\PixelDrain.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\icon.ico"
+    CreateShortCut "`$DESKTOP\PixelDrain.lnk" "`$INSTDIR\$AppName.exe"
     
     ; Registry information for add/remove programs
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "DisplayName" "PixelDrain"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "UninstallString" "`$INSTDIR\Uninstall.exe"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "DisplayIcon" "`$INSTDIR\icon.ico"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "DisplayIcon" "`$INSTDIR\$AppName.exe"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "Publisher" "$Author"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "DisplayVersion" "$Version"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PixelDrain" "NoModify" 1
@@ -145,7 +154,6 @@ SectionEnd
 Section "Uninstall"
     ; Remove files
     Delete "`$INSTDIR\$AppName.exe"
-    Delete "`$INSTDIR\icon.ico"
     Delete "`$INSTDIR\Uninstall.exe"
     
     ; Remove shortcuts
@@ -181,9 +189,8 @@ function Create-PortablePackage {
     $PortableDir = Join-Path $DistDir "PixelDrain-Portable"
     New-Item -ItemType Directory -Force -Path $PortableDir | Out-Null
     
-    # Copy executable
+    # Copy executable (icon is now embedded)
     Copy-Item (Join-Path $BuildDir "release\$AppName.exe") $PortableDir
-    Copy-Item (Join-Path $AssetsDir "icon.ico") $PortableDir
     
     # Create README
     $ReadmeContent = @"
@@ -223,4 +230,4 @@ function Main {
 }
 
 # Run main function
-Main 
+Main

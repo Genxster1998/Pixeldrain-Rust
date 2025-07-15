@@ -146,6 +146,8 @@ create_macos_dmg() {
         echo -e "${YELLOW}Removing existing DMG: $DIST_DIR/$dmg_name${NC}"
         rm "$DIST_DIR/$dmg_name"
     fi
+    # AdHoc Sign the app
+    codesign --force --deep --sign - "$app_dir"
     
     create-dmg \
         --volname "PixelDrain $VERSION" \
@@ -260,6 +262,7 @@ EOF
         echo -e "${YELLOW}Please install NSIS and run: makensis $nsis_script${NC}"
     fi
 }
+#rm $DIST_DIR/installer.nsi
 
 # Function to create Linux packages
 create_linux_packages() {
