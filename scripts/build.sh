@@ -281,13 +281,25 @@ create_linux_packages() {
     mkdir -p "$usr_share_icons_dir"
     
     # Copy executable
+    if [ ! -f "$BUILD_DIR/release/$APP_NAME" ]; then
+        echo -e "${RED}Error: Executable not found at $BUILD_DIR/release/$APP_NAME${NC}"
+        return 1
+    fi
     cp "$BUILD_DIR/release/$APP_NAME" "$usr_bin_dir/"
     chmod +x "$usr_bin_dir/$APP_NAME"
     
     # Copy desktop file
+    if [ ! -f "$PROJECT_DIR/build/pixeldrain.desktop" ]; then
+        echo -e "${RED}Error: Desktop file not found at $PROJECT_DIR/build/pixeldrain.desktop${NC}"
+        return 1
+    fi
     cp "$PROJECT_DIR/build/pixeldrain.desktop" "$usr_share_applications_dir/"
     
     # Copy icon
+    if [ ! -f "$ASSETS_DIR/dark-icon.png" ]; then
+        echo -e "${RED}Error: Icon not found at $ASSETS_DIR/dark-icon.png${NC}"
+        return 1
+    fi
     cp "$ASSETS_DIR/dark-icon.png" "$usr_share_icons_dir/pixeldrain.png"
     
     # Create control file
@@ -350,9 +362,25 @@ EOF
         local appimage_dir="$DIST_DIR/AppDir"
         mkdir -p "$appimage_dir"
         
+        # Check if required files exist
+        if [ ! -f "$BUILD_DIR/release/$APP_NAME" ]; then
+            echo -e "${RED}Error: Executable not found at $BUILD_DIR/release/$APP_NAME${NC}"
+            return 1
+        fi
+        
+        if [ ! -f "$PROJECT_DIR/build/pixeldrain.desktop" ]; then
+            echo -e "${RED}Error: Desktop file not found at $PROJECT_DIR/build/pixeldrain.desktop${NC}"
+            return 1
+        fi
+        
+        if [ ! -f "$ASSETS_DIR/dark-icon.png" ]; then
+            echo -e "${RED}Error: Icon not found at $ASSETS_DIR/dark-icon.png${NC}"
+            return 1
+        fi
+        
         # Copy files to AppDir
-        cp "$BUILD_DIR/release/$APP_NAME" "$appimage_dir/AppRun"
-        chmod +x "$appimage_dir/AppRun"
+        cp "$BUILD_DIR/release/$APP_NAME" "$appimage_dir/$APP_NAME"
+        chmod +x "$appimage_dir/$APP_NAME"
         cp "$ASSETS_DIR/dark-icon.png" "$appimage_dir/pixeldrain.png"
         cp "$PROJECT_DIR/build/pixeldrain.desktop" "$appimage_dir/"
         
@@ -366,8 +394,19 @@ exec "\${HERE}/$APP_NAME" "\$@"
 EOF
         chmod +x "$appimage_dir/AppRun"
         
-        appimagetool "$appimage_dir" "$DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage"
-        echo -e "${GREEN}✅ AppImage created: $DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage${NC}"
+        # Clean up any existing AppImage
+        if [ -f "$DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage" ]; then
+            rm "$DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage"
+        fi
+        
+        ARCH=x86_64 appimagetool "$appimage_dir" "$DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage"
+        
+        if [ -f "$DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage" ]; then
+            echo -e "${GREEN}✅ AppImage created: $DIST_DIR/PixelDrain-$VERSION-x86_64.AppImage${NC}"
+        else
+            echo -e "${RED}❌ AppImage creation failed${NC}"
+            return 1
+        fi
     else
         echo -e "${YELLOW}appimagetool not found. AppImage not created.${NC}"
         echo -e "${YELLOW}Install with: wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage && chmod +x appimagetool${NC}"
