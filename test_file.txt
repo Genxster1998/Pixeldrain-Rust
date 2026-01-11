@@ -1,3 +1,0 @@
-This is a test file to understand the PixelDrain API response structure.
-The user is experiencing "error decoding response body" when trying to refresh lists.
-This suggests the API returns a different JSON structure than expected.
